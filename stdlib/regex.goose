@@ -101,6 +101,7 @@ struct Regex {
     nullable: bool,         // whether the empty string matches
     placed: bool,           // whether every group has a fixed place
     has_assert: bool,       // whether pattern has ^, $, \b, \B
+    start_anchor: bool,     // whether pattern begins with ^
     entry: i32,             // where the program starts an anchored match
     classes: u8[256],       // byte -> its column in the DFAs
     skip: Skip,
@@ -197,7 +198,7 @@ fn nothing() -> Regex {
     let dead = Dfa { start: 0, match_end: 1, special: 1, trans: [0] };
     let none: ByteSet = byte_set([false; 256]);
     return Regex {
-        groups: 1, nullable: false, placed: false, has_assert: false, entry: 0, classes: [0; 256], skip: Skip.Scan,
+        groups: 1, nullable: false, placed: false, has_assert: false, start_anchor: false, entry: 0, classes: [0; 256], skip: Skip.Scan,
         filter: Prefilter { len: 0, at1: 0, at2: 0, set1: none, set2: none }, inner: none,
         fwd: dead, rev: dead, before: dead, places: [], prog: [Inst.Match], sets: [],
     };
@@ -692,11 +693,22 @@ fn build(pattern: u8[:], err: u8[>..]&, aborts: bool) -> Regex {
     let scans = skip != Skip.Scan;
     var too_big = false;
     let dead = Dfa { start: 0, match_end: 1, special: 1, trans: [0] };
+    var start_anchor = false;
+    var apc = entry;
+    loop {
+        match prog[apc] {
+            Save sv => { apc = sv.next; },
+            Assert a => { start_anchor = a.kind == ASSERT_START; break; },
+            _ => { break; },
+        }
+    }
+
     let re = Regex {
         groups: groups,
         nullable: prefix.len == 0,
         placed: placed,
         has_assert: has_assert,
+        start_anchor: start_anchor,
         entry: entry,
         classes: classes,
         skip: skip,
@@ -1082,13 +1094,12 @@ enum Frame { Explore { pc: i32, at: i64 }, Restore { slot: i32, old: i64 } }
 // thread to reach the match instruction is the one the match took. Each
 // (instruction, position) pair is explored once at most, which `visited`,
 // the caller's scratch, records.
-fn backtrack(re: Regex&, text: u8[:], start: i64, end: i64, slots: i64[:], visited: bool[>..]&) {
+fn backtrack(re: Regex&, text: u8[:], start: i64, end: i64, slots: i64[:], visited: i32[>..]&, gen: i32) {
     let prog = re.prog;
     let sets = re.sets;
     let width = end - start + 1;
     let need = prog.len * width;
-    if visited.len < need { visited.resize(need, false); }
-    fill(visited[..need], false);
+    if visited.len < need { visited.resize(need, 0); }
     var stack: Frame[>..<] = [];
     fill(slots, -1);
     stack.push(Frame.Explore { pc: re.entry, at: start });
@@ -1100,8 +1111,8 @@ fn backtrack(re: Regex&, text: u8[:], start: i64, end: i64, slots: i64[:], visit
                 var i = x.at;
                 loop {
                     let k = pc * width + (i - start);
-                    if visited[k] { break; }
-                    visited[k] = true;
+                    if visited[k] == gen { break; }
+                    visited[k] = gen;
                     match prog[pc] {
                         Byte b => {
                             guard i < end && sets[b.set][text[i]] else { break; }
@@ -1133,10 +1144,21 @@ fn backtrack(re: Regex&, text: u8[:], start: i64, end: i64, slots: i64[:], visit
 fn find_assert(re: Regex&, text: u8[:], at: i64) -> i64, i64 {
     var slots: i64[>..] = [];
     slots.resize(2 * re.groups, -1);
-    var visited: bool[>..] = [];
+    var visited: i32[>..] = [];
+    var gen: i32 = 1;
     var p = at;
     while p <= text.len {
-        backtrack(re, text, p, text.len, slots, visited);
+        if re.start_anchor && p > 0 && text[p - 1] != '\n' {
+            while p < text.len && text[p] != '\n' { p++; }
+            if p >= text.len { break; }
+            p++;
+        }
+        backtrack(re, text, p, text.len, slots, visited, gen);
+        gen++;
+        if gen == 2147483647 {
+            fill(visited[..], 0);
+            gen = 1;
+        }
         if slots[0] >= 0 {
             return slots[0], slots[1];
         }
@@ -1147,8 +1169,12 @@ fn find_assert(re: Regex&, text: u8[:], at: i64) -> i64, i64 {
 
 // The capture slots of the match [start, end): from the groups' places
 // where every group has a fixed one, and by backtracking where not.
-fn captures(re: Regex&, text: u8[:], start: i64, end: i64, slots: i64[:], visited: bool[>..]&) {
-    guard re.placed && !re.has_assert else { backtrack(re, text, start, end, slots, visited); return; }
+fn captures(re: Regex&, text: u8[:], start: i64, end: i64, slots: i64[:], visited: i32[>..]&) {
+    guard re.placed && !re.has_assert else {
+        fill(visited[..], 0);
+        backtrack(re, text, start, end, slots, visited, 1);
+        return;
+    }
     for &p, k in re.places {
         slots[2 * k] = if p.start_back { end - p.start } else { start + p.start };
         slots[2 * k + 1] = if p.end_back { end - p.end } else { start + p.end };
@@ -1255,7 +1281,7 @@ fn is_nullable(re: Regex&) -> bool { re.nullable }
 fn each_captures<F>(re: Regex&, text: u8[:]) {
     var slots: i64[>..] = [];
     slots.resize(2 * re.groups, -1);
-    var visited: bool[>..] = [];
+    var visited: i32[>..] = [];
     each_match(re, text) { s, e =>
         captures(re, text, s, e, slots, visited);
         F(Captures { text: text, slots: slots });

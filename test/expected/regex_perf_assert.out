@@ -1,0 +1,8 @@
+start anchor on 20k no match: -1 -1
+start anchor match after newline: 10001 10004
+capture group 1: bbb
+end anchor on 20k no match: -1 -1
+end anchor match before newline: 10001 10004
+word boundary in 20k: 10001 10007
+non-word boundary: 1 4 / -1 -1
+empty line count: 1
