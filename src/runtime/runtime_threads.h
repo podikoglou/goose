@@ -183,6 +183,16 @@ static int gs_run_contained(gs_thread *t, gs_contained *c) {
     return 0;
 }
 
+typedef struct gs_pool_worker {
+    struct gs_pool_worker *next;
+    gs_thread *task;
+    gs_cond cond;
+} gs_pool_worker;
+
+static gs_pool_worker *gs_pool_idle;
+static int gs_pool_idle_count;
+#define GS_POOL_MAX_IDLE 16
+
 #ifdef _WIN32
 static DWORD WINAPI gs_thread_main(LPVOID p)
 #else
@@ -190,28 +200,49 @@ static void *gs_thread_main(void *p)
 #endif
 {
     gs_thread *t = (gs_thread *)p;
-    gs_regions_begin(gs_workerregions);
-    gs_native_stack_init();
-    gs_current_thread_id = t->id;
-    int aborted = 0;
-    gs_contained contain;
-    if (t->contained) aborted = gs_run_contained(t, &contain);
-    else t->run(t->entry, t->args);
-    t->release();
-    free(t->args);
-    gs_release_regions();
+    gs_pool_worker pw;
+    gs_cond_init(&pw.cond);
+    pw.task = NULL;
 
-    /* Publish completion only after all Goose storage has been released.
-       No waiter retains a pointer to this record. The detached native thread
-       releases its own final OS stack/TLS state on returning below. */
-    gs_mutex_lock(&gs_threads_mutex);
-    gs_thread **slot = &gs_threads;
-    while (*slot != t) slot = &(*slot)->next;
-    *slot = t->next;
-    if (aborted) gs_aborted_add(t->id, contain.msg, contain.len);
-    free(t);
-    gs_cond_broadcast(&gs_threads_done);
-    gs_mutex_unlock(&gs_threads_mutex);
+    for (;;) {
+        gs_regions_begin(gs_workerregions);
+        gs_native_stack_init();
+        gs_current_thread_id = t->id;
+        int aborted = 0;
+        gs_contained contain;
+        if (t->contained) aborted = gs_run_contained(t, &contain);
+        else t->run(t->entry, t->args);
+        t->release();
+        free(t->args);
+        gs_release_regions();
+
+        /* Publish completion only after all Goose storage has been released.
+           No waiter retains a pointer to this record. */
+        gs_mutex_lock(&gs_threads_mutex);
+        gs_thread **slot = &gs_threads;
+        while (*slot != t) slot = &(*slot)->next;
+        *slot = t->next;
+        if (aborted) gs_aborted_add(t->id, contain.msg, contain.len);
+        free(t);
+        gs_cond_broadcast(&gs_threads_done);
+
+        /* Park idle worker in pool for reuse instead of repeated pthread_create/exit */
+        if (gs_pool_idle_count < GS_POOL_MAX_IDLE) {
+            pw.task = NULL;
+            pw.next = gs_pool_idle;
+            gs_pool_idle = &pw;
+            gs_pool_idle_count++;
+
+            while (!pw.task) {
+                gs_cond_wait(&pw.cond, &gs_threads_mutex);
+            }
+            t = pw.task;
+            gs_mutex_unlock(&gs_threads_mutex);
+        } else {
+            gs_mutex_unlock(&gs_threads_mutex);
+            break;
+        }
+    }
     #ifdef _WIN32
         return 0;
     #else
@@ -242,6 +273,17 @@ GS_API int64_t gs_thread_start(void (*run)(void (*)(uint8_t *), uint8_t *),
     t->id = id;
     t->next = gs_threads;
     gs_threads = t;
+
+    if (gs_pool_idle) {
+        gs_pool_worker *pw = gs_pool_idle;
+        gs_pool_idle = pw->next;
+        gs_pool_idle_count--;
+        pw->task = t;
+        gs_cond_signal(&pw->cond);
+        gs_mutex_unlock(&gs_threads_mutex);
+        return id;
+    }
+
     int failed;
     #ifdef _WIN32
         HANDLE handle = CreateThread(NULL, 0, gs_thread_main, t, 0, NULL);

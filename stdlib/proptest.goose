@@ -253,12 +253,26 @@ fn ::next_u8(d: Driver&) -> u8 {
 }
 
 fn ::next_u16(d: Driver&) -> u16 {
+    if d.has_buf && !d.record_mode && d.cursor + 2 <= d.buf.len {
+        let lo = d.buf[d.cursor] as u16;
+        let hi = d.buf[d.cursor + 1] as u16;
+        d.cursor += 2;
+        return lo | (hi << 8);
+    }
     let lo = next_u8(d) as u16;
     let hi = next_u8(d) as u16;
     lo | (hi << 8)
 }
 
 fn ::next_u32(d: Driver&) -> u32 {
+    if d.has_buf && !d.record_mode && d.cursor + 4 <= d.buf.len {
+        let b0 = d.buf[d.cursor] as u32;
+        let b1 = d.buf[d.cursor + 1] as u32;
+        let b2 = d.buf[d.cursor + 2] as u32;
+        let b3 = d.buf[d.cursor + 3] as u32;
+        d.cursor += 4;
+        return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
+    }
     let lo = next_u16(d) as u32;
     let hi = next_u16(d) as u32;
     lo | (hi << 16)
@@ -279,6 +293,19 @@ fn ::next_u64(d: Driver&) -> u64 {
         d.recorded.push(((val >> 48) & 0xFF) as u8);
         d.recorded.push(((val >> 56) & 0xFF) as u8);
         return val;
+    }
+    if !d.record_mode && d.cursor + 8 <= d.buf.len {
+        let b0 = d.buf[d.cursor] as u64;
+        let b1 = d.buf[d.cursor + 1] as u64;
+        let b2 = d.buf[d.cursor + 2] as u64;
+        let b3 = d.buf[d.cursor + 3] as u64;
+        let b4 = d.buf[d.cursor + 4] as u64;
+        let b5 = d.buf[d.cursor + 5] as u64;
+        let b6 = d.buf[d.cursor + 6] as u64;
+        let b7 = d.buf[d.cursor + 7] as u64;
+        d.cursor += 8;
+        return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24) |
+               (b4 << 32) | (b5 << 40) | (b6 << 48) | (b7 << 56);
     }
     if d.cursor >= d.buf.len {
         d.exhausted = true;
@@ -577,6 +604,19 @@ fn ::gen_bool_prob(d: Driver&, p: f64) -> bool {
 fn ::gen_bytes(d: Driver&, min_len: i64, max_len: i64) -> u8[>..] {
     let len = gen_i64_range(d, min_len, max_len);
     var res: u8[>..] = [];
+    if d.has_buf && !d.record_mode {
+        let avail = d.buf.len - d.cursor;
+        let take = if len < avail { len } else { avail };
+        if take > 0 {
+            res.append(d.buf[d.cursor..d.cursor + take]);
+            d.cursor += take;
+        }
+        for _ in (len - take) {
+            res.push(0);
+        }
+        if len > avail { d.exhausted = true; }
+        return res;
+    }
     for _ in len {
         res.push(next_u8(d));
     }
@@ -1348,11 +1388,11 @@ fn ::_push_num_padded(out: u8[>..]&, n: i64, width: i32) {
 fn ::_fuzz_stderr_is_live() -> bool {
     // Respect GOOSE_PROGRESS=plain|live; fall back to isatty.
     var val: u8[>..] = [];
-    if os::env("GOOSE_PROGRESS", val) {
+    if env("GOOSE_PROGRESS", val) {
         if val[..] == "plain" { return false; }
         if val[..] == "live"  { return true;  }
     }
-    os::stderr_is_tty()
+    stderr_is_tty()
 }
 
 fn ::_print_fuzz_progress(iter: i64, elapsed_ns: i64, corpus_count: i64, max_len: i64) {
@@ -1741,11 +1781,11 @@ fn ::run_contained<W>(c: Config) -> TestResult {
     run(c) { d =>
         var cand: u8[>..] = [];
         if d.has_buf {
-            for b in d.buf { cand.push(b); }
+            cand.append(d.buf);
             d.cursor = d.buf.len;
         } else {
             let len = gen_i64_range(d, 1, max_len_or_default(c));
-            for _ in len { cand.push(next_u8(d)); }
+            cand = gen_bytes(d, len, len);
         }
         var why: u8[>..] = [];
         let id = thread_spawn_contained(W, ContainedInput { data: cand[..] });

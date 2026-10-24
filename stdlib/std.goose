@@ -398,14 +398,23 @@ struct ByteSet {
 
 fn byte_set(members: bool[256]) -> ByteSet {
     var n = 0;
-    for m in members { if m { n += 1; } }
     var s = ByteSet { members: members, kind: 5, invert: false, bytes: [0; 3], lo: [0; 16],
                       hi: [0; 16] };
     for b in 256 {
         if members[b] {
+            n += 1;
             let bit = (1 << ((b >> 4) & 7)) as u8;
             if b < 128 { s.lo[b & 15] |= bit; } else { s.hi[b & 15] |= bit; }
         }
+    }
+    if n == 0 {
+        s.kind = 0;
+        return s;
+    }
+    if n == 256 {
+        s.kind = 0;
+        s.invert = true;
+        return s;
     }
     // The bytes a kind describes: the members, or the others where those
     // are fewer.

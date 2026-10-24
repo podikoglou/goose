@@ -799,6 +799,7 @@ Options:
   --seed hex|dec        Initial seed for fuzzing (default random).
   --replay path|hex     Replay a specific crash file or hex string on the target.
   --corpus-dir path     Save/load crash artifacts to this directory.
+  --isolate             Run each execution in an isolated thread (default in-process).
   -O0, -O1, -O2         Inlining level (default -O2).
 )", DEBUGOPTION, COMPILEOPTIONS,
 R"(  --cc name|path        The C compiler: msvc, clang-cl, clang, gcc, cc or a
@@ -1093,6 +1094,7 @@ int Main(int argc, char **argv) {
     uint64_t fuzz_seed = 0;
     string fuzz_replay;
     string fuzz_corpus_dir;
+    bool fuzz_isolate = false;
     // A build is for a deliverable: the inlining at its highest. The C
     // compiler optimizes whatever the level, unless --debug (Builder::CFlags).
     auto optlevel = (verb == "build" || verb == "fuzz") ? 2 : 1;
@@ -1208,6 +1210,7 @@ int Main(int argc, char **argv) {
         }
         else if (arg == "--replay" && i + 1 < argc) fuzz_replay = argv[++i];
         else if (arg == "--corpus-dir" && i + 1 < argc) fuzz_corpus_dir = argv[++i];
+        else if (arg == "--isolate") fuzz_isolate = true;
         // A -D lands in the generated C itself rather than on some backend's
         // command line, so a JIT run and a compiled one see the same source.
         else if (arg == "-D" && i + 1 < argc) cdefines.push_back(argv[++i]);
@@ -1701,23 +1704,77 @@ int Main(int argc, char **argv) {
             if (rtype == "bool") returns_bool = true;
         }
 
-        string call;
         string worker_body;
-        if (pkind == PK_DRIVER) {
-            worker_body += "    var d = make_driver_from_bytes(tc.data[..], 64);\n";
-            call = cat(chosen->qname, "(d)");
-        } else if (pkind == PK_STRING) {
-            call = cat(chosen->qname, "(tc.data[..])");
-        } else if (pkind == PK_BYTES) {
-            call = cat(chosen->qname, "(tc.data[..])");
-        } else {
-            call = cat(chosen->qname, "()");
-        }
+        string runner_call;
+        string harness_header;
 
-        if (returns_bool) {
-            worker_body += cat("    if !", call, " {\n        abort(\"fuzz target returned false\");\n    }\n");
+        if (fuzz_isolate) {
+            string call;
+            if (pkind == PK_DRIVER) {
+                worker_body += "    var d = make_driver_from_bytes(tc.data[..], 64);\n";
+                call = cat(chosen->qname, "(d)");
+            } else if (pkind == PK_STRING) {
+                call = cat(chosen->qname, "(tc.data[..])");
+            } else if (pkind == PK_BYTES) {
+                call = cat(chosen->qname, "(tc.data[..])");
+            } else {
+                call = cat(chosen->qname, "()");
+            }
+
+            if (returns_bool) {
+                worker_body += cat("    if !", call, " {\n        abort(\"fuzz target returned false\");\n    }\n");
+            } else {
+                worker_body += cat("    ", call, ";\n");
+            }
+            harness_header = "thread_fn _fuzz_worker(tc: ContainedInput) {\n";
+            runner_call = "    for_each_contained(c, _fuzz_worker);\n";
         } else {
-            worker_body += cat("    ", call, ";\n");
+            // Fast in-process worker
+            if (pkind == PK_DRIVER) {
+                if (returns_bool) {
+                    worker_body += cat("    return ", chosen->qname, "(d);\n");
+                } else {
+                    worker_body += cat("    ", chosen->qname, "(d);\n    return true;\n");
+                }
+            } else if (pkind == PK_STRING) {
+                auto mlen = fuzz_max_len > 0 ? fuzz_max_len : 1024;
+                worker_body += "    if d.has_buf {\n";
+                if (returns_bool) {
+                    worker_body += cat("        return ", chosen->qname, "(d.buf[..]);\n");
+                } else {
+                    worker_body += cat("        ", chosen->qname, "(d.buf[..]);\n        return true;\n");
+                }
+                worker_body += "    }\n";
+                worker_body += cat("    var s = d.ascii(0, ", mlen, ");\n");
+                if (returns_bool) {
+                    worker_body += cat("    return ", chosen->qname, "(s[..]);\n");
+                } else {
+                    worker_body += cat("    ", chosen->qname, "(s[..]);\n    return true;\n");
+                }
+            } else if (pkind == PK_BYTES) {
+                auto mlen = fuzz_max_len > 0 ? fuzz_max_len : 1024;
+                worker_body += "    if d.has_buf {\n";
+                if (returns_bool) {
+                    worker_body += cat("        return ", chosen->qname, "(d.buf[..]);\n");
+                } else {
+                    worker_body += cat("        ", chosen->qname, "(d.buf[..]);\n        return true;\n");
+                }
+                worker_body += "    }\n";
+                worker_body += cat("    var b = d.bytes(0, ", mlen, ");\n");
+                if (returns_bool) {
+                    worker_body += cat("    return ", chosen->qname, "(b[..]);\n");
+                } else {
+                    worker_body += cat("    ", chosen->qname, "(b[..]);\n    return true;\n");
+                }
+            } else {
+                if (returns_bool) {
+                    worker_body += cat("    return ", chosen->qname, "();\n");
+                } else {
+                    worker_body += cat("    ", chosen->qname, "();\n    return true;\n");
+                }
+            }
+            harness_header = "fn _fuzz_worker(d: Driver&) -> bool {\n";
+            runner_call = "    for_each(c) { d => _fuzz_worker(d) };\n";
         }
 
         string main_body = "    var c = check().fuzz().verbose();\n";
@@ -1755,7 +1812,7 @@ int Main(int argc, char **argv) {
         // opaque run_contained(...) snippet.
         Append(main_body, "    c = fuzz_source_file(c, \"", targetfile, "\");\n");
         Append(main_body, "    c = fuzz_target_name(c, \"", string(chosen->name), "\");\n");
-        main_body += "    for_each_contained(c, _fuzz_worker);\n";
+        main_body += runner_call;
 
         auto target_stem = PathStem(targetfile);
         auto harness_file = cat(DirOf(targetfile), ".goose_fuzz_", target_stem, ".goose");
@@ -1763,7 +1820,7 @@ int Main(int argc, char **argv) {
             "/* Synthesized by goose fuzz for target ", chosen->qname, " */\n",
             "import proptest;\n",
             "import .", target_stem, ";\n\n",
-            "thread_fn _fuzz_worker(tc: ContainedInput) {\n",
+            harness_header,
             worker_body,
             "}\n\n",
             "fn main() {\n",
