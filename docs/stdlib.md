@@ -474,8 +474,18 @@ fn get_or_insert<K, V>(d: dictionary<K, V>&, key: K, v0: V) -> V&
 fn update<K, V, F>(d: dictionary<K, V>&, key: K, v0: V)         // F(val&); inserts v0 first if absent
 fn remove<K, V>(d: dictionary<K, V>&, key: K) -> bool
 fn clear<K, V>(d: dictionary<K, V>&)
+fn len<K, V>(d: dictionary<K, V>&) -> i64                      // d.count
 fn reserve<K, V>(d: dictionary<K, V>&, n: i64)                  // room for n entries without a rehash
 fn each<K, V, F>(d: dictionary<K, V>&)                          // F(key, val&); order unspecified
+
+struct set<T> { count: i64, slots: set_slot<T>[>..<] }
+fn contains<T>(s: set<T>&, val: T) -> bool
+fn insert<T>(s: set<T>&, val: T) -> bool                        // true if newly inserted, false if present
+fn remove<T>(s: set<T>&, val: T) -> bool                        // true if present and removed
+fn clear<T>(s: set<T>&)
+fn len<T>(s: set<T>&) -> i64                                   // s.count
+fn reserve<T>(s: set<T>&, n: i64)                              // room for n entries without a rehash
+fn each<T, F>(s: set<T>&)                                      // F(val); order unspecified
 ```
 
 Open addressing with linear probing, power-of-two capacity, backward-shift
@@ -488,7 +498,8 @@ doubles in place at 2/3 load; `reserve(n)` sizes it for `n` entries at that
 load.
 Strings are keyed as `u8[:]` slices into text the caller keeps (`const u8[:]`
 for literals or views of `const` data, §9.5), or as inline
-`u8[..k]`. A set is `dictionary<K, bool>`.
+`u8[..k]`. A hash set is `set<T>`, sharing the same open-addressing
+mechanics and backward-shift deletion without value storage.
 
 The slot array is grow-shrink, so a reference into it — a `get` or
 `get_or_insert` result, an `each` binder — must be done with before the next
@@ -531,6 +542,16 @@ owner.insert(7, cells[3]);
 let c = owner.get(7);
 owner.insert(7, cells[4]);       // cells[3] is unchanged, and c still refers to it
 if c { c.v += 1; }
+```
+
+```goose
+var visited = set<const u8[:]> {};
+if visited.insert("home") {
+    print("new location");
+}
+print(visited.contains("home"));     // true
+print(visited.len());                // 1
+visited.remove("home");
 ```
 
 ## vec

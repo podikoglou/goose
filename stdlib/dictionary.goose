@@ -190,3 +190,132 @@ fn reserve<K, V>(d: dictionary<K, V>&, n: i64) {
 fn each<K, V, F>(d: dictionary<K, V>&) {
     for &s in d.slots { if s.tag != 0 { F(s.key, &s.val); } }
 }
+
+fn len<K, V>(d: dictionary<K, V>&) -> i64 { d.count }
+
+// --- set<T> ---
+
+struct set_slot<T> { key: T, tag: u32 }
+struct set<T> { count: i64 = 0, slots: set_slot<T>[>..<] = [] }
+
+// The slot holding val, or -1.
+fn set_probe<T>(s: set<T>&, val: T) -> i64 {
+    if s.count == 0 { return -1; }
+    let h = hash(val);
+    let tag = dict_tag(h);
+    let mask = s.slots.len - 1;
+    var i = (h & (mask as u64)) as i64;
+    loop {
+        let t = s.slots[i].tag;
+        if t == tag {
+            if s.slots[i].key == val { return i; }
+        } else if t == 0 {
+            return -1;
+        }
+        i = (i + 1) & mask;
+    }
+}
+
+// The slot holding val, or else the unused slot where it goes, for a table
+// that has one.
+fn set_find_slot<T>(s: set<T>&, val: T, h: u64) -> i64 {
+    let tag = dict_tag(h);
+    let mask = s.slots.len - 1;
+    var i = (h & (mask as u64)) as i64;
+    loop {
+        let t = s.slots[i].tag;
+        if t == tag {
+            if s.slots[i].key == val { return i; }
+        } else if t == 0 {
+            return i;
+        }
+        i = (i + 1) & mask;
+    }
+}
+
+// Room for one more entry: starts at 8 slots and doubles at 2/3 load.
+fn set_room<T>(s: set<T>&) {
+    if s.slots.len == 0 {
+        set_grow(s, 8);
+    } else if (s.count + 1) * 3 > s.slots.len * 2 {
+        set_grow(s, s.slots.len * 2);
+    }
+}
+
+// Grows the set to cap slots in place.
+fn set_grow<T>(s: set<T>&, cap: i64) {
+    let old = s.slots.len;
+    s.slots.resize(cap, set_slot<T> { default<T>(), 0 });
+    if s.count == 0 { return; }
+    let mask = cap - 1;
+    var st = 0;
+    while s.slots[st].tag != 0 { st += 1; }
+    for k in 1..old {
+        var p = st + k;
+        if p >= old { p -= old; }
+        let t = s.slots[p].tag;
+        if t != 0 {
+            var q = (t as i64) & mask;
+            if mask >= 2147483648 { q = (hash(s.slots[p].key) & (mask as u64)) as i64; }
+            let e = s.slots[p];
+            s.slots[p].tag = 0;
+            while s.slots[q].tag != 0 { q = (q + 1) & mask; }
+            s.slots[q] = e;
+        }
+    }
+}
+
+fn contains<T>(s: set<T>&, val: T) -> bool { set_probe(s, val) >= 0 }
+
+// Inserts val into the set; returns true if newly inserted, false if already present.
+fn insert<T>(s: set<T>&, val: T) -> bool {
+    set_room(s);
+    let h = hash(val);
+    let i = set_find_slot(s, val, h);
+    if s.slots[i].tag != 0 {
+        return false;
+    }
+    s.slots[i] = set_slot<T> { val, dict_tag(h) };
+    s.count += 1;
+    return true;
+}
+
+// Removes val; returns true if present and removed, false if not found.
+fn remove<T>(s: set<T>&, val: T) -> bool {
+    var i = set_probe(s, val);
+    if i < 0 { return false; }
+    let mask = s.slots.len - 1;
+    var j = i;
+    loop {
+        j = (j + 1) & mask;
+        let t = s.slots[j].tag;
+        if t == 0 { break; }
+        var h = (t as i64) & mask;
+        if mask >= 2147483648 { h = (hash(s.slots[j].key) & (mask as u64)) as i64; }
+        if ((j - h) & mask) >= ((j - i) & mask) {
+            s.slots[i] = s.slots[j];
+            i = j;
+        }
+    }
+    s.slots[i] = set_slot<T> { default<T>(), 0 };
+    s.count -= 1;
+    return true;
+}
+
+fn len<T>(s: set<T>&) -> i64 { s.count }
+
+fn clear<T>(s: set<T>&) {
+    for &slot in s.slots { slot.tag = 0; }
+    s.count = 0;
+}
+
+// Room for n entries without growing.
+fn reserve<T>(s: set<T>&, n: i64) {
+    let need = max(next_pow2((n * 3 + 1) / 2), 8);
+    if need > s.slots.len { set_grow(s, need); }
+}
+
+// F(val) for every entry, in no particular order.
+fn each<T, F>(s: set<T>&) {
+    for &slot in s.slots { if slot.tag != 0 { F(slot.key); } }
+}
