@@ -19,7 +19,7 @@ struct Place {
 // A name as a file has it: a use, or a declaration of something.
 struct Occurrence {
     enum Kind {
-        IDENT, DOT, TYPE, INIT,                     // Uses: a name, a member, a type name, a literal's field.
+        IDENT, DOT, TYPE, INIT, LITERAL,            // Uses: a name, a member, a type name, a literal's field, a literal.
         FN, STRUCT, ENUM, ALIAS, GLOBAL, LOCAL,     // Declarations.
         FIELD, VARIANT, PARAM, GENERIC, BINDER      // Parts of declarations, and the bindings of loops, arms and blocks.
     };
@@ -329,6 +329,8 @@ struct Analysis {
         function<int64_t(Node *, bool)> visit = [&](Node *n, bool callee) -> int64_t {
             if (!n) return -1;
             auto fileidx = n->line.fileidx;
+            int64_t start = infile(fileidx) && n->line.line > 0
+                ? files[(size_t)fileidx].text.OffsetOf(n->line.line, n->line.col) : -1;
             if (auto id = Is<Ident>(n)) {
                 Occurrence o;
                 o.kind = Occurrence::IDENT;
@@ -393,9 +395,20 @@ struct Analysis {
                     o.isvar = fv->params[i].isvar;
                     at(o, fv->params[i].line, fv->params[i].name);
                 }
+            } else if (Is<IntLit>(n) || Is<FltLit>(n) || Is<StrLit>(n) || Is<BoolLit>(n) || Is<NullLit>(n)) {
+                if (start >= 0 && n->end.line > 0 && n->end.fileidx == fileidx) {
+                    auto end = files[(size_t)fileidx].text.OffsetOf(n->end.line, n->end.col);
+                    if (end > start) {
+                        Occurrence o;
+                        o.kind = Occurrence::LITERAL;
+                        o.node = n;
+                        o.len = (size_t)(end - start);
+                        if (infile(fileidx))
+                            o.name = files[(size_t)fileidx].text.text.substr((size_t)start, o.len);
+                        add(o, fileidx, start);
+                    }
+                }
             }
-            int64_t start = infile(fileidx) && n->line.line > 0
-                ? files[(size_t)fileidx].text.OffsetOf(n->line.line, n->line.col) : -1;
             auto child = [&](Node *ch, bool iscallee) {
                 auto s = visit(ch, iscallee);
                 if (s >= 0 && ch->line.fileidx == fileidx && (start < 0 || s < start)) start = s;

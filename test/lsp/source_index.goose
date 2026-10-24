@@ -48,6 +48,7 @@ fn main() {
 // lsp: hint 18:14 "p:"
 // lsp: hints 20 2
 // lsp: hover 18:18 "b: i64"
+// lsp: hover 35:38 "value of literal: `,`"
 // lsp: definition 18:18 -> 7:24
 // lsp: rename 7:24 bb -> 3
 // lsp: references 14:4 2

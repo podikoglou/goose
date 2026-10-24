@@ -486,6 +486,32 @@ def check_lsp_protocol(exe, base):
     close_doc(main)
     client.send("workspace/didChangeConfiguration", {"settings": {"goose": {"entryFiles": []}}}, request=False)
     hover_has(helper, "4:4", "fn helper::twice", "once basics.goose is no entry file")
+
+    # Hover over literals: integers (decimal, hex, binary), floats with bits,
+    # strings (including newline truncation and backtick fences), booleans, chars, and null.
+    lit_path = fixtures / "literal_hover.goose"
+    lit_text = """fn check_literals() {
+    let a = 0x2A;
+    let b = true;
+    let c = '`';
+    let s = "hello`world";
+    let nl = "line 1\\nline 2";
+    let f: f32 = 1.0;
+    let n: i64? = null;
+    let sp = " ";
+}
+"""
+    open_fixture(lit_path, lit_text)
+    hover_has(lit_path, "2:13", "value of literal: `42 (0x2A|0b101010)`", "on hex int literal")
+    hover_has(lit_path, "3:13", "value of literal: `true`", "on bool literal")
+    hover_has(lit_path, "4:13", "value of literal: `` ` ``", "on char literal with backtick")
+    hover_has(lit_path, "5:13", "value of literal: ``hello`world``", "on string literal with backtick")
+    hover_has(lit_path, "6:14", "value of literal (truncated up to newline): `line 1`", "on string literal with newline")
+    hover_has(lit_path, "7:18", "value of literal: `1 (bits: 0x3F800000)`", "on f32 literal")
+    hover_has(lit_path, "8:19", "value of literal: `null`", "on null literal")
+    hover_has(lit_path, "9:14", "value of literal: ` `", "on all-space string literal")
+    close_doc(lit_path)
+
     client.request("shutdown", None)
     client.send("exit", request=False)
     code = client.p.wait(timeout=30)

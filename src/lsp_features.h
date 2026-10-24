@@ -565,6 +565,170 @@ inline HoverText HoverType(const Located &loc, const Occurrence &occ) {
     return h;
 }
 
+inline string MarkdownInlineCode(string_view s) {
+    size_t max_run = 0, cur_run = 0;
+    for (char c : s) {
+        if (c == '`') {
+            cur_run++;
+            if (cur_run > max_run) max_run = cur_run;
+        } else {
+            cur_run = 0;
+        }
+    }
+    string fence(max_run > 0 ? max_run + 1 : 1, '`');
+    bool starts_tick = !s.empty() && s.front() == '`';
+    bool ends_tick = !s.empty() && s.back() == '`';
+    bool starts_space = !s.empty() && s.front() == ' ';
+    bool ends_space = !s.empty() && s.back() == ' ';
+    bool is_all_space = !s.empty();
+    for (char c : s) if (c != ' ') { is_all_space = false; break; }
+
+    if (starts_tick || ends_tick || ((starts_space || ends_space) && !is_all_space)) {
+        return cat(fence, " ", s, " ", fence);
+    }
+    return cat(fence, s, fence);
+}
+
+inline string ToHex(uint64_t u) {
+    if (u == 0) return "0";
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%llX", (unsigned long long)u);
+    return buf;
+}
+
+inline string ToBin(uint64_t u) {
+    if (u == 0) return "0";
+    string s;
+    while (u > 0) {
+        s += (u & 1) ? '1' : '0';
+        u >>= 1;
+    }
+    reverse(s.begin(), s.end());
+    return s;
+}
+
+inline string FormatInt(int64_t val, bool uns) {
+    if (uns || val >= 0) {
+        uint64_t u = (uint64_t)val;
+        return cat(to_string(u), " (0x", ToHex(u), "|0b", ToBin(u), ")");
+    } else {
+        uint64_t u = (uint64_t)(0 - (uint64_t)val);
+        return cat("-", to_string(u), " (-0x", ToHex(u), "|-0b", ToBin(u), ")");
+    }
+}
+
+inline string CharToUtf8(uint32_t cp) {
+    string out;
+    if (cp <= 0x7F) {
+        out += (char)cp;
+    } else if (cp <= 0x7FF) {
+        out += (char)(0xC0 | (cp >> 6));
+        out += (char)(0x80 | (cp & 0x3F));
+    } else if (cp <= 0xFFFF) {
+        out += (char)(0xE0 | (cp >> 12));
+        out += (char)(0x80 | ((cp >> 6) & 0x3F));
+        out += (char)(0x80 | (cp & 0x3F));
+    } else if (cp <= 0x10FFFF) {
+        out += (char)(0xF0 | (cp >> 18));
+        out += (char)(0x80 | ((cp >> 12) & 0x3F));
+        out += (char)(0x80 | ((cp >> 6) & 0x3F));
+        out += (char)(0x80 | (cp & 0x3F));
+    }
+    return out;
+}
+
+inline HoverText HoverLiteral(const Located &loc, const Occurrence &occ) {
+    HoverText h;
+    auto n = occ.node;
+    if (!n) return h;
+
+    TypeExpr *type = nullptr;
+    if (auto il = Is<IntLit>(n)) type = il->fixedtype;
+    else if (auto fl = Is<FltLit>(n)) type = fl->fixedtype;
+
+    if (!type) type = loc.an->TypeOf(n);
+    if (!type) {
+        if (auto il = Is<IntLit>(n))
+            type = loc.an->ast->inttypes[il->uns ? IS_U64 : IS_I64];
+        else if (Is<FltLit>(n))
+            type = loc.an->ast->flttypes[FS_F64];
+        else if (Is<BoolLit>(n))
+            type = loc.an->ast->booltype;
+        else if (Is<StrLit>(n)) {
+            auto sl = loc.an->ast->SliceOf(loc.an->ast->inttypes[IS_U8], n->line);
+            sl->cq = true;
+            type = sl;
+        }
+    }
+    if (type) h.header = TypeText(type);
+    else if (Is<NullLit>(n)) h.header = "null";
+    else h.header = "?";
+
+    auto types = loc.an->TypesOf(n, 4);
+    if (types.size() > 1) {
+        string extra = "// in other instantiations:";
+        for (auto t : types) {
+            auto ts = TypeText(t);
+            if (ts != h.header) Append(extra, "\n", ts);
+        }
+        if (extra != "// in other instantiations:") h.extra = std::move(extra);
+    }
+
+    string raw_val;
+    if (auto il = Is<IntLit>(n)) {
+        if (il->text.size() >= 2 && il->text.front() == '\'' && il->text.back() == '\'') {
+            raw_val = CharToUtf8((uint32_t)il->val);
+        } else {
+            raw_val = FormatInt(il->val, il->uns);
+        }
+    } else if (auto fl = Is<FltLit>(n)) {
+        bool is_f32 = type && type->kind == TY_FLT && type->fltstorage == FS_F32;
+        if (is_f32) {
+            float f = (float)fl->val;
+            uint32_t bits = 0;
+            memcpy(&bits, &f, sizeof(bits));
+            char numbuf[64];
+            auto [ptr, ec] = to_chars(numbuf, numbuf + sizeof(numbuf) - 1, f);
+            *ptr = '\0';
+            char hexbuf[32];
+            snprintf(hexbuf, sizeof(hexbuf), "%X", (unsigned)bits);
+            raw_val = cat(numbuf, " (bits: 0x", hexbuf, ")");
+        } else {
+            double d = fl->val;
+            uint64_t bits = 0;
+            memcpy(&bits, &d, sizeof(bits));
+            char numbuf[64];
+            auto [ptr, ec] = to_chars(numbuf, numbuf + sizeof(numbuf) - 1, d);
+            *ptr = '\0';
+            char hexbuf[32];
+            snprintf(hexbuf, sizeof(hexbuf), "%llX", (unsigned long long)bits);
+            raw_val = cat(numbuf, " (bits: 0x", hexbuf, ")");
+        }
+    } else if (auto bl = Is<BoolLit>(n)) {
+        raw_val = bl->val ? "true" : "false";
+    } else if (auto sl = Is<StrLit>(n)) {
+        raw_val = sl->val;
+    } else if (Is<NullLit>(n)) {
+        raw_val = "null";
+    }
+
+    auto nl = raw_val.find('\n');
+    bool truncated = (nl != string::npos);
+    string_view text_to_show = raw_val;
+    if (truncated) {
+        text_to_show = string_view(raw_val).substr(0, nl);
+        if (!text_to_show.empty() && text_to_show.back() == '\r')
+            text_to_show.remove_suffix(1);
+    }
+    string quoted = MarkdownInlineCode(text_to_show);
+    if (truncated) {
+        h.doc = cat("value of literal (truncated up to newline): ", quoted);
+    } else {
+        h.doc = cat("value of literal: ", quoted);
+    }
+    return h;
+}
+
 inline HoverText HoverOf(const Located &loc, const Occurrence &occ) {
     HoverText h;
     auto &an = *loc.an;
@@ -674,6 +838,7 @@ inline HoverText HoverOf(const Located &loc, const Occurrence &occ) {
                 h.doc = DocText(f->doc);
             }
             break;
+        case Occurrence::LITERAL: return HoverLiteral(loc, occ);
         case Occurrence::IDENT: return HoverIdent(loc, occ);
         case Occurrence::DOT:   return HoverDot(loc, occ);
         case Occurrence::TYPE:  return HoverType(loc, occ);
@@ -721,6 +886,8 @@ inline Place DefinitionOf(const Located &loc, const Occurrence &occ) {
             return Place { loc.fi->fileidx, occ.start, occ.len };
         case Occurrence::INIT:
             if (auto f = FieldOfInit(an, occ)) return PlaceOfLine(an, f->line, f->name.size());
+            return {};
+        case Occurrence::LITERAL:
             return {};
         case Occurrence::IDENT: {
             auto id = Is<Ident>(occ.node);
@@ -972,6 +1139,7 @@ inline int SemanticTokenOf(const Located &loc, const Occurrence &occ, int &modif
                 default:         return -1;
             }
         case Occurrence::INIT: return ST_PROPERTY;
+        case Occurrence::LITERAL: return -1;
         case Occurrence::IDENT: {
             auto id = Is<Ident>(occ.node);
             if (PatternVariantOf(an, occ)) return ST_ENUMMEMBER;

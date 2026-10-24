@@ -56,6 +56,8 @@ fn spare(x) { x }
 // lsp: hover 36:19 "fn helper::twice(x: i64) -> i64"
 // lsp: hover 38:7 "builtin .push"
 // lsp: hover 39:13 "builtin .len: i64"
+// lsp: hover 30:24 "value of literal: `1 (0x1|0b1)`"
+// lsp: hover 32:17 "value of literal: `1.5 (bits: 0x3FF8000000000000)`"
 // lsp: definition 31:15 -> 15:4
 // lsp: definition 31:21 -> 10:5
 // lsp: definition 30:13 -> 8:8
