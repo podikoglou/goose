@@ -380,6 +380,22 @@ format_uleb(head, payload.len);
 write_file(path, head); append_file(path, payload);
 ```
 
+### ASCII characters
+
+```goose
+fn is_alpha(b: u8) -> bool       // ('a'..'z', 'A'..'Z')
+fn is_digit(b: u8) -> bool       // ('0'..'9')
+fn is_alnum(b: u8) -> bool       // alpha or digit
+fn is_hex_digit(b: u8) -> bool   // ('0'..'9', 'a'..'f', 'A'..'F')
+fn to_lower_ascii(b: u8) -> u8
+fn to_upper_ascii(b: u8) -> u8
+```
+
+Byte predicates and ASCII case conversions on single `u8` bytes. Non-ASCII
+bytes and characters outside `'A'..'Z'` or `'a'..'z'` pass through
+`to_lower_ascii` and `to_upper_ascii` unchanged. All six functions support
+method-call syntax on byte values (e.g. `c.is_digit()`, `c.to_lower_ascii()`).
+
 ## exception
 
 Typed exceptions implemented in Goose with `return ... from` (spec §7.9),

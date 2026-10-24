@@ -525,9 +525,17 @@ fn reverse<T>(xs: T[:]) {
     }
 }
 
+// ASCII byte predicates and single-byte conversions.
+fn is_alpha(b: u8) -> bool { (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') }
+fn is_digit(b: u8) -> bool { b >= '0' && b <= '9' }
+fn is_alnum(b: u8) -> bool { is_alpha(b) || is_digit(b) }
+fn is_hex_digit(b: u8) -> bool { is_digit(b) || (b >= 'a' && b <= 'f') || (b >= 'A' && b <= 'F') }
+fn to_lower_ascii(b: u8) -> u8 { if b >= 'A' && b <= 'Z' { b + 32 } else { b } }
+fn to_upper_ascii(b: u8) -> u8 { if b >= 'a' && b <= 'z' { b - 32 } else { b } }
+
 // ASCII, in place.
-fn to_lower(s: u8[:]) { for &c in s { if c >= 'A' && c <= 'Z' { c += 32; } } }
-fn to_upper(s: u8[:]) { for &c in s { if c >= 'a' && c <= 'z' { c -= 32; } } }
+fn to_lower(s: u8[:]) { for &c in s { c = to_lower_ascii(c); } }
+fn to_upper(s: u8[:]) { for &c in s { c = to_upper_ascii(c); } }
 
 // ---- arrays: sorting -----------------------------------------------------------
 // The sort_ helpers take the comparator as F, "a goes before b", and are

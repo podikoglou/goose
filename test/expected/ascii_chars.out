@@ -1,0 +1,24 @@
+alpha_count: 52
+digit_count: 10
+alnum_count: 62
+hex_count: 22
+alnum_matches_union: true
+lower_changed: 26
+upper_changed: 26
+idempotent: true
+digits: true true false true true
+digit bounds: false true true false
+lower: true true true
+lower bounds: false true true false
+upper: true true true
+upper bounds: false true true false
+hex: true true true true true true
+hex non-match: false false false false
+control: false false false false false false
+control conv: true true
+punct: false false false false false false false
+punct conv: true true
+high bytes pred: false false false false
+high bytes conv: true true
+ufcs pred: true true false false
+ufcs conv: true true true
