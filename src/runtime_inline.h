@@ -3613,6 +3613,7 @@ GS_API uint8_t gs_os_list_dir(sl_u8 path, gs_rref out);
 GS_API void gs_os_write_stdout(sl_u8 s);
 GS_API void gs_os_write_stderr(sl_u8 s);
 GS_API void gs_os_flush_stdout(void);
+GS_API uint8_t gs_os_stderr_is_tty(void);
 GS_API uint8_t gs_os_read_line(gs_rref out);
 GS_API void gs_os_read_stdin(gs_rref out);
 GS_API int64_t gs_os_arg_count(void);
@@ -4043,6 +4044,16 @@ GS_API void gs_os_write_stdout(sl_u8 s) {
 
 GS_API void gs_os_write_stderr(sl_u8 s) {
     if (s.len > 0) fwrite(s.data, 1, (size_t)s.len, stderr);
+}
+
+GS_API uint8_t gs_os_stderr_is_tty(void) {
+#ifdef _WIN32
+    DWORD mode;
+    return GetConsoleMode(GetStdHandle(STD_ERROR_HANDLE), &mode) != 0 ? 1 : 0;
+#else
+    const char *term = getenv("TERM");
+    return (isatty(STDERR_FILENO) && !(term && !strcmp(term, "dumb"))) ? 1 : 0;
+#endif
 }
 
 GS_API void gs_os_flush_stdout(void) { fflush(stdout); }

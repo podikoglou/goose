@@ -178,6 +178,7 @@ GS_API uint8_t gs_os_list_dir(sl_u8 path, gs_rref out);
 GS_API void gs_os_write_stdout(sl_u8 s);
 GS_API void gs_os_write_stderr(sl_u8 s);
 GS_API void gs_os_flush_stdout(void);
+GS_API uint8_t gs_os_stderr_is_tty(void);
 GS_API uint8_t gs_os_read_line(gs_rref out);
 GS_API void gs_os_read_stdin(gs_rref out);
 GS_API int64_t gs_os_arg_count(void);

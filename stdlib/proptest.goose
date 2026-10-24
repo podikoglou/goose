@@ -1335,15 +1335,26 @@ fn ::_push_num_padded(out: u8[>..]&, n: i64, width: i32) {
     }
 }
 
+fn ::_fuzz_stderr_is_live() -> bool {
+    // Respect GOOSE_PROGRESS=plain|live; fall back to isatty.
+    var val: u8[>..] = [];
+    if os::env("GOOSE_PROGRESS", val) {
+        if val[..] == "plain" { return false; }
+        if val[..] == "live"  { return true;  }
+    }
+    os::stderr_is_tty()
+}
+
 fn ::_print_fuzz_progress(iter: i64, elapsed_ns: i64, corpus_count: i64, max_len: i64) {
     let elapsed_sec = elapsed_ns / 1000000000;
     let s = elapsed_sec % 60;
     let m = (elapsed_sec / 60) % 60;
     let h = elapsed_sec / 3600;
     let rate = if elapsed_sec > 0 { iter / elapsed_sec } else { 0 };
+    let live = _fuzz_stderr_is_live();
 
     var line: u8[>..] = [];
-    line.push(13); // '\r'
+    if live { line.push(13); } else { line.push(10); } // '\r' live, '\n' plain
     line.push(32); line.push(32); // "  "
     line.push(91); // '['
     _push_num_padded(line, h, 2);
@@ -1365,6 +1376,8 @@ fn ::_print_fuzz_progress(iter: i64, elapsed_ns: i64, corpus_count: i64, max_len
 }
 
 fn ::_clear_fuzz_progress() {
+    // Only erase the live line when stderr is actually a terminal.
+    if !_fuzz_stderr_is_live() { return; }
     var line: u8[>..] = [];
     line.push(13);
     for _ in 80 { line.push(32); }

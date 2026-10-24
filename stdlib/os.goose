@@ -35,6 +35,7 @@ extern fn read_stdin(out: u8[>..]&) = "gs_os_read_stdin";        // everything u
 extern fn write_stdout(s: const u8[:]) = "gs_os_write_stdout";
 extern fn write_stderr(s: const u8[:]) = "gs_os_write_stderr";
 extern fn flush_stdout() = "gs_os_flush_stdout";
+extern fn stderr_is_tty() -> bool = "gs_os_stderr_is_tty"; // true when stderr is an interactive terminal
 
 // Arguments and environment.
 extern fn arg_count() -> i64 = "gs_os_arg_count";

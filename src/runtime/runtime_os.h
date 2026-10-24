@@ -408,6 +408,16 @@ GS_API void gs_os_write_stderr(sl_u8 s) {
     if (s.len > 0) fwrite(s.data, 1, (size_t)s.len, stderr);
 }
 
+GS_API uint8_t gs_os_stderr_is_tty(void) {
+#ifdef _WIN32
+    DWORD mode;
+    return GetConsoleMode(GetStdHandle(STD_ERROR_HANDLE), &mode) != 0 ? 1 : 0;
+#else
+    const char *term = getenv("TERM");
+    return (isatty(STDERR_FILENO) && !(term && !strcmp(term, "dumb"))) ? 1 : 0;
+#endif
+}
+
 GS_API void gs_os_flush_stdout(void) { fflush(stdout); }
 
 /* One line of stdin, without its newline or a carriage return before it;
