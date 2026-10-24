@@ -613,7 +613,9 @@ class Runner:
             match = re.match(r"^\S.*:\d+(?::\d+)?: error: (.*)$", line)
             if match:
                 diagnostics.append(match[1])
-            elif line.startswith("  in const for "):
+            elif line.startswith("  in const for ") or line.startswith("  help:"):
+                diagnostics.append(line.strip())
+            elif line.strip().startswith("`recursive fn"):
                 diagnostics.append(line.strip())
             elif line == "program needs exactly one global fn main()":
                 diagnostics.append(line)

@@ -557,8 +557,12 @@ struct TypeCheck {
             if (!i->node->expansiontrace.empty()) return i->node->expansiontrace;
         return {};
     }
-    [[noreturn]] void Error(Line l, const string &msg) {
-        ErrorIn(LocOf(l), msg, Chain(ActiveExpansionTrace()));
+    [[noreturn]] void Error(Line l, const string &msg,
+                            vector<Diagnostic::Related> related = {}) {
+        auto chain = Chain(ActiveExpansionTrace());
+        if (!related.empty())
+            chain.insert(chain.begin(), related.begin(), related.end());
+        ErrorIn(LocOf(l), msg, std::move(chain));
     }
 
     // An error at code checked earlier, with the instantiation chain taken
@@ -711,9 +715,12 @@ struct TypeCheck {
         }
     }
 
-    [[noreturn]] void Error(const Node *n, const string &msg) {
-        ErrorIn(LocOf(n), msg,
-                Chain(n->expansiontrace.empty() ? ActiveExpansionTrace() : n->expansiontrace));
+    [[noreturn]] void Error(const Node *n, const string &msg,
+                            vector<Diagnostic::Related> related = {}) {
+        auto chain = Chain(n->expansiontrace.empty() ? ActiveExpansionTrace() : n->expansiontrace);
+        if (!related.empty())
+            chain.insert(chain.begin(), related.begin(), related.end());
+        ErrorIn(LocOf(n), msg, std::move(chain));
     }
 
     // A warning, about node `at` as the source has it; or, where `cast` is

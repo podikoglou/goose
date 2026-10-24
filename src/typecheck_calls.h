@@ -2087,7 +2087,8 @@ inline void TypeCheck::JoinCycle(FnSpec *spec, Node *callnode) {
             Error(frames[i].cyclecall,
                   cat(FrameFnName(i), " calls into its recursive cycle while non-fixed-size "
                       "local ", v->name, " (declared at ", Where(v->line), ") is in scope "
-                      "(§7.8): end its scope before the call"));
+                      "(§7.8): end its scope before the call"),
+                  { { {}, "help: declare as `recursive fn` and pass a growable destination buffer by reference:\n        `recursive fn <name>(out: T[>..]&, ...)`" } });
         }
     }
     for (auto i = fi; i <= last; i++) CycleCallTemps(i, callnode);
