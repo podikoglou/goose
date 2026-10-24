@@ -1978,7 +1978,7 @@ def main():
         checks.append(("--help", code == 0 and "build" in overview and
                        "--multi-test" not in overview, overview + err))
         pages = overview
-        for cmd in ["run", "build", "check", "fetch", "toolchain", "version"]:
+        for cmd in ["run", "build", "fuzz", "check", "fetch", "toolchain", "version"]:
             code, out, err = tc.run_capture([exe, cmd, "--help"])
             checks.append((f"{cmd} --help", code == 0 and
                            out.startswith(f"usage: goose {cmd}"), out + err))
@@ -2003,6 +2003,9 @@ def main():
         code, out, err = tc.run_capture([exe, "build"])
         checks.append(("build (no file)", code == 1 and "usage: goose build" in err and
                        "goose build --help" in err, out + err))
+        code, out, err = tc.run_capture([exe, "fuzz"])
+        checks.append(("fuzz (no file)", code == 1 and "usage: goose fuzz" in err and
+                       "goose fuzz --help" in err, out + err))
         # The compiler's own toolchain discovery: where this runner found a C
         # compiler, the compiler must find one too, and say so as JSON.
         code, out, err = tc.run_capture([exe, "toolchain", "--json"])
@@ -2074,6 +2077,17 @@ def main():
             code, out, err = tc.run_capture([exe, "build", "--dry-run", "-o", str(dry), probe])
             checks.append(("build --dry-run", code == 0 and not dry.exists() and
                            "verbs" in out and "goose_runtime" in out, out + err))
+            # `goose fuzz` with discovery, continuous execution, and replay
+            fuzz_probe = gendir / "fuzz_verbs.goose"
+            tc.write_text(fuzz_probe, 'import proptest;\n'
+                                      'fuzz fn fuzz_pass(data: const u8[:]) { if data.len > 1000000 { abort("impossible"); } }\n'
+                                      'fuzz fn fuzz_crash(data: const u8[:]) { if data.len > 0 && data[0] == 42 { abort("hit"); } }\n')
+            code, out, err = tc.run_capture([exe, "fuzz", str(fuzz_probe), "--list-targets"])
+            checks.append(("fuzz --list-targets", code == 0 and "fuzz_pass" in out and "fuzz_crash" in out, out + err))
+            code, out, err = tc.run_capture([exe, "fuzz", str(fuzz_probe), "--target", "fuzz_pass", "--timeout", "1"])
+            checks.append(("fuzz --timeout 1", code == 0 and "proptest [fuzz]:" in out, out + err))
+            code, out, err = tc.run_capture([exe, "fuzz", str(fuzz_probe), "--target", "fuzz_crash", "--replay", "2a"])
+            checks.append(("fuzz --replay", code == 1 and "Replay failed" in out + err, out + err))
         for what, good, text in checks:
             if good:
                 r.ok(f"goose {what}")

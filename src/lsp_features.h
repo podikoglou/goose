@@ -69,6 +69,7 @@ inline string FnHeader(const SFunction *sf) {
     if (sf->isexport) s += "export ";
     if (sf->isextern) s += "extern ";
     if (sf->checkfree && !sf->isnested) s += "checkfree ";
+    if (sf->isfuzz) s += "fuzz ";
     if (sf->isinline) s += "inline ";
     if (sf->issimd) s += "simd ";
     if (sf->isrec) s += "recursive ";

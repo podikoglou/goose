@@ -1,0 +1,115 @@
+// runtime-debug: proptest properties, generators, byte drivers and shrinking.
+import std;
+import proptest;
+
+fn assert(cond: bool, msg: const u8[:] = "") {
+    if !cond {
+        if msg.len > 0 {
+            print("assertion failed: ", msg);
+        } else {
+            print("assertion failed");
+        }
+        abort("test failed");
+    }
+}
+
+fn test_driver_modes() {
+    var d_prng = driver(42, 5);
+    let u1 = d_prng.next_u64();
+    let u2 = d_prng.next_u64();
+    assert(u1 != u2, "prng driver produces distinct values");
+
+    let raw: u8[4] = [0x12, 0x34, 0x56, 0x78];
+    var d_buf = driver_from_bytes(raw, 5);
+    assert(d_buf.has_bytes(), "buf has bytes");
+    assert(d_buf.next_u8() == 0x12, "next_u8 matches");
+    assert(d_buf.next_u8() == 0x34, "next_u8 matches");
+    assert(d_buf.next_u16() == 0x7856, "next_u16 matches little endian");
+    assert(!d_buf.has_bytes(), "buf exhausted");
+    assert(d_buf.next_u8() == 0, "exhausted buf yields 0");
+
+    var d_rec = recording_driver(1234, 5);
+    let b = d_rec.next_u8();
+    let w = d_rec.next_u32();
+    let q = d_rec.next_u64();
+    assert(d_rec.recorded.len == 13, "recorded bytes tracked correctly");
+}
+
+fn test_generators() {
+    var d = driver(999, 5);
+    let i = d.gen_i64_range(-50, 50);
+    assert(i >= -50 && i <= 50, "i64 in range");
+
+    let u = d.gen_u64_range(100, 200);
+    assert(u >= 100 && u <= 200, "u64 in range");
+
+    let flt = d.gen_f64_range(1.5, 9.5);
+    assert(flt >= 1.5 && flt <= 9.5, "f64 in range");
+
+    let b = d.gen_bool();
+    assert(b == true || b == false, "bool valid");
+
+    let s = d.gen_ascii_string(5, 10);
+    assert(s.len >= 5 && s.len <= 10, "string len in range");
+
+    var xs: i64[>..] = d.gen_array(3, 8) { dr => dr.gen_i64_range(0, 10) };
+    assert(xs.len >= 3 && xs.len <= 8, "array len in range");
+
+    let choices: i64[3] = [10, 20, 30];
+    let pick = d.gen_one_of(choices);
+    assert(pick == 10 || pick == 20 || pick == 30, "one_of picks valid choice");
+}
+
+fn test_properties() {
+    // Commutativity of addition
+    check()
+        .seed(112233)
+        .iterations(1000)
+        .for_each() { d =>
+            let a = d.gen_i64_range(-100000, 100000);
+            let b = d.gen_i64_range(-100000, 100000);
+            (a + b) == (b + a)
+        };
+
+    // Array sort idempotence
+    check()
+        .seed(445566)
+        .iterations(200)
+        .for_each() { d =>
+            var xs: i64[>..] = d.gen_array(0, 30) { dr => dr.gen_i64_range(-1000, 1000) };
+            xs.sort();
+            var copy_xs: i64[>..] = copy(xs);
+            copy_xs.sort();
+            var eq = true;
+            for idx in xs.len {
+                if xs[idx] != copy_xs[idx] { eq = false; break; }
+            }
+            eq
+        };
+}
+
+fn test_shrinking() {
+    let res = check().seed(18248584007027029822).iterations(1).run() { d =>
+        let a = d.gen_i64_range(0, 10000000);
+        let b = d.gen_i64_range(0, 10000000);
+        !(a >= 100 && b >= 200)
+    };
+
+    assert(!res.passed, "property must fail");
+    assert(res.shrunk, "property result must be shrunk");
+    assert(res.shrink_steps > 0, "shrink steps > 0");
+
+    var d_min = driver_from_bytes(res.shrunk_bytes[..], 5);
+    let a_min = d_min.gen_i64_range(0, 10000000);
+    let b_min = d_min.gen_i64_range(0, 10000000);
+    assert(a_min == 100, "a shrinks to exactly 100");
+    assert(b_min == 200, "b shrinks to exactly 200");
+}
+
+fn main() {
+    test_driver_modes();
+    test_generators();
+    test_properties();
+    test_shrinking();
+    print("proptest: all properties, generators, drivers and shrinking passed");
+}

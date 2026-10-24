@@ -1454,6 +1454,7 @@ struct SFunction {
     bool isrec = false;         // Declared with `recursive`.
     bool isinline = false;      // Declared with `inline`: inlined whatever its size (§7.13).
     bool issimd = false;        // Declared with `simd`: one version per instruction set (§7.12).
+    bool isfuzz = false;        // Declared with `fuzz`: first-class fuzz target.
     // Declared with `checkfree`, or nested in such a function: a bounds
     // check left in any copy of the body is an error (bce.h).
     bool checkfree = false;

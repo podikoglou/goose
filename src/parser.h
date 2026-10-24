@@ -119,7 +119,7 @@ struct Parser {
             case T_RETURN: case T_BREAK: case T_CONTINUE:
                 return !declaration;
             default:
-                return AtInline() || AtCheckfree();
+                return AtInline() || AtCheckfree() || AtFuzz();
         }
     }
 
@@ -280,6 +280,14 @@ struct Parser {
                next == T_EXTERN || next == T_IDENT;
     }
 
+    // `fuzz` is a contextual keyword before a function declaration.
+    bool AtFuzz() {
+        if (lex.tok != T_IDENT || lex.attr != "fuzz") return false;
+        auto next = lex.PeekTok();
+        return next == T_FN || next == T_RECURSIVE || next == T_THREADFN || next == T_SIMD ||
+               next == T_EXTERN || next == T_IDENT;
+    }
+
     void Expect(TType t, const char *context) {
         if (lex.tok != t)
             Error(cat("expected \'", TName(t), "\' in ", context, ", found \'", TokStr(), "\'"));
@@ -419,7 +427,7 @@ struct Parser {
             default: break;
         }
         declseen = true;
-        if (AtInline() || AtCheckfree()) goto fndecl;
+        if (AtInline() || AtCheckfree() || AtFuzz()) goto fndecl;
         switch (lex.tok) {
             case T_STRUCT: ParseStructDecl(); return;
             case T_ENUM:   ParseEnumDecl();   return;
@@ -691,6 +699,11 @@ struct Parser {
         auto oldcname = pre && !inblock && !pre->cname.empty();
         auto oldline = line;
         auto checkfree = false;
+        auto isfuzz = false;
+        if (AtFuzz()) {
+            isfuzz = true;
+            lex.Next();
+        }
         if (AtCheckfree()) {
             checkfree = true;
             lex.Next();
@@ -733,10 +746,20 @@ struct Parser {
             if (sf->isextern) Error("extern fn cannot be simd: it has no body to compile");
             sf->issimd = true;
         }
+        if (!isfuzz && AtFuzz()) {
+            isfuzz = true;
+            lex.Next();
+        }
+        if (isfuzz) {
+            if (nested) Error("fuzz fn must be declared at top level");
+            if (sf->isextern) Error("extern fn cannot be fuzz: it has no body to fuzz");
+            sf->isfuzz = true;
+        }
         if (AtInline()) {
             if (sf->isextern) Error("extern fn cannot be inline: it has no body to copy");
             if (sf->isexport) Error("export fn cannot be inline: its C wrapper calls it");
             if (sf->issimd) Error("simd fn cannot be inline: its callers would run the baseline only");
+            if (sf->isfuzz) Error("fuzz fn cannot be inline");
             sf->isinline = true;
             lex.Next();
         }
@@ -744,6 +767,7 @@ struct Parser {
         if (sf->isinline && sf->isrec) Error("recursive fn cannot be inline");
         if (lex.tok == T_THREADFN) {
             if (sf->isinline) Error("thread_fn cannot be inline");
+            if (sf->isfuzz) Error("thread_fn cannot be fuzz");
             sf->isthread = true;
             if (nested) Error("thread_fn must be declared at top level");
             lex.Next();
@@ -1860,7 +1884,7 @@ struct Parser {
     // One statement of b, or its tail; returns false once the block has
     // ended (its `}` consumed, by a guard's rest of the block included).
     bool ParseStatement(Block *b) {
-        if (AtInline() || AtCheckfree()) goto nestedfndecl;
+        if (AtInline() || AtCheckfree() || AtFuzz()) goto nestedfndecl;
         switch (lex.tok) {
             case T_LET: case T_VAR: case T_CONST: case T_REUSABLE: {
                 if (lex.tok == T_CONST && lex.PeekTok() == T_FOR) {

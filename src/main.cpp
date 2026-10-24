@@ -721,6 +721,7 @@ Commands:
   run        Compile a program and run it in this process, which goose
              file.goose does too.
   build      Build an executable with a C compiler on this machine.
+  fuzz       Discovers and continuously fuzzes targets in a file.
   check      Parse and typecheck a program, and run nothing.
   fetch      Fetch the packages a program declares.
   toolchain  Report the C compiler, cmake and git found, and GOOSE_HOME.
@@ -780,6 +781,29 @@ R"(  --cc name|path        The C compiler: msvc, clang-cl, clang, gcc, cc or a
   --standalone          Compile the runtime into the program rather than link
                         the runtime object built once per C compiler.
   -v                    Print each command the build runs and what it prints.
+  --dry-run             Print the commands the build would run, and run none.
+)");
+    if (topic == "fuzz") return cat(
+R"(usage: goose fuzz file.goose [options]
+
+Discovers and continuously fuzzes functions marked with 'fuzz fn' or named
+'fuzz_*'. Synthesizes an execution harness that catches worker traps and
+minimizes crashing inputs.
+
+Options:
+  --target name         Fuzz a specific target function.
+  --list-targets        List discovered fuzz targets in the file and exit.
+  --timeout secs        Run for a maximum duration in seconds (default 0, runs
+                        continuously until interrupted).
+  --max-len n           Maximum bytes to generate for byte-slice inputs (default 1024).
+  --seed hex|dec        Initial seed for fuzzing (default random).
+  --replay path|hex     Replay a specific crash file or hex string on the target.
+  --corpus-dir path     Save/load crash artifacts to this directory.
+  -O0, -O1, -O2         Inlining level (default -O2).
+)", DEBUGOPTION, COMPILEOPTIONS,
+R"(  --cc name|path        The C compiler: msvc, clang-cl, clang, gcc, cc or a
+                        path (or GOOSE_CC; by default the first one found).
+  -v                    Print each command that builds the fuzzer, and what it prints.
   --dry-run             Print the commands the build would run, and run none.
 )");
     if (topic == "check") return cat(
@@ -1022,7 +1046,7 @@ int Main(int argc, char **argv) {
     if (argc > 1) {
         string v = argv[1];
         if (v == "run" || v == "build" || v == "check" || v == "fetch" || v == "toolchain" ||
-            v == "version" || v == "help" || v == "lsp") {
+            v == "version" || v == "help" || v == "lsp" || v == "fuzz") {
             verb = v;
             firstarg = 2;
         }
@@ -1062,9 +1086,16 @@ int Main(int argc, char **argv) {
     auto json = false, refresh = false, debug = false, verbose = false, dryrun = false;
     auto jsondiag = false;
     string ccrequest;
+    string fuzz_target;
+    bool fuzz_list_targets = false;
+    int fuzz_timeout = 0;
+    int64_t fuzz_max_len = 0;
+    uint64_t fuzz_seed = 0;
+    string fuzz_replay;
+    string fuzz_corpus_dir;
     // A build is for a deliverable: the inlining at its highest. The C
     // compiler optimizes whatever the level, unless --debug (Builder::CFlags).
-    auto optlevel = verb == "build" ? 2 : 1;
+    auto optlevel = (verb == "build" || verb == "fuzz") ? 2 : 1;
     vector<string> cdefines, progargs, includenames, files;
     for (int i = firstarg; i < argc; i++) {
         string arg = argv[i];
@@ -1167,6 +1198,16 @@ int Main(int argc, char **argv) {
         else if (arg == "--update") package_update = true;
         else if (arg == "--offline") package_nofetch = true;
         else if (arg == "--dump-docs") dumpdocs = true;
+        else if (arg == "--target" && i + 1 < argc) fuzz_target = argv[++i];
+        else if (arg == "--list-targets") fuzz_list_targets = true;
+        else if (arg == "--timeout" && i + 1 < argc) fuzz_timeout = atoi(argv[++i]);
+        else if (arg == "--max-len" && i + 1 < argc) fuzz_max_len = atoll(argv[++i]);
+        else if (arg == "--seed" && i + 1 < argc) {
+            string s = argv[++i];
+            fuzz_seed = (s.rfind("0x", 0) == 0 || s.rfind("0X", 0) == 0) ? strtoull(s.c_str(), nullptr, 16) : strtoull(s.c_str(), nullptr, 10);
+        }
+        else if (arg == "--replay" && i + 1 < argc) fuzz_replay = argv[++i];
+        else if (arg == "--corpus-dir" && i + 1 < argc) fuzz_corpus_dir = argv[++i];
         // A -D lands in the generated C itself rather than on some backend's
         // command line, so a JIT run and a compiled one see the same source.
         else if (arg == "-D" && i + 1 < argc) cdefines.push_back(argv[++i]);
@@ -1210,10 +1251,10 @@ int Main(int argc, char **argv) {
         // Parsing is what fetches: every package the root declares is
         // fetched as its entry is reached.
         parseonly = true;
-    } else if (verb == "build") {
+    } else if (verb == "build" || verb == "fuzz") {
         if (multitest || !headername.empty()) {
-            fprintf(stderr, "goose build takes one program and no --header; the flag form "
-                            "(-o out.c) writes the C for a C host\n");
+            fprintf(stderr, "goose %s takes one program and no --header; the flag form "
+                            "(-o out.c) writes the C for a C host\n", verb.c_str());
             return 1;
         }
         buildopts = BuildOptions { debug, verbose, dryrun, standalone, outname };
@@ -1242,7 +1283,7 @@ int Main(int argc, char **argv) {
     // With no output file the program is compiled into this process and run,
     // which is what --jit asks for explicitly; a build writes the C to its
     // build directory instead.
-    auto jit = verb != "build" && (forcejit || outname.empty());
+    auto jit = (verb != "build" && verb != "fuzz") && (forcejit || outname.empty());
     if (!headername.empty() && (jit || multitest)) {
         fprintf(stderr, "--header requires C output for a single input file\n");
         return 1;
@@ -1472,7 +1513,7 @@ int Main(int argc, char **argv) {
                 outfile.replace(pos, 1, stem);
         }
         includes = includenames;
-        if (verb == "build") {
+        if (verb == "build" || verb == "fuzz") {
             builddir = ProgramBuildDir(file);
             std::error_code ec;
             filesystem::create_directories(filesystem::path(builddir), ec);
@@ -1499,7 +1540,7 @@ int Main(int argc, char **argv) {
             // (CMakeLists.txt).
             auto code = RunOnCompilerStack(compile);
             if (code) return code;
-            if (verb == "build") {
+            if (verb == "build" || verb == "fuzz") {
                 if (nocgen) return 0;
                 // The native parts first, so that the link can take their
                 // response files: a builtin package's from the compiler's
@@ -1570,6 +1611,203 @@ int Main(int argc, char **argv) {
         if (jsondiag) fputs(DiagnosticsJson(found, astp.get()).c_str(), stdout);
         return code;
     };
+    if (verb == "fuzz") {
+        auto targetfile = files[0];
+        Ast ast;
+        auto stdlibdirs = StdlibDirs(stdlibdir, exe);
+        ParseProgram(ast, targetfile, stdlibdirs, DirOf(exe));
+        if (!ast.errors.empty()) return 1;
+
+        vector<SFunction *> targets;
+        for (auto sf : ast.functions) {
+            if (sf->line.fileidx == 0 && !sf->isnested &&
+                (sf->isfuzz || sf->name.rfind("fuzz_", 0) == 0) && sf->name != "main") {
+                targets.push_back(sf);
+            }
+        }
+
+        if (fuzz_list_targets) {
+            if (targets.empty()) {
+                printf("no fuzz targets found in %s\n", targetfile.c_str());
+            } else {
+                printf("fuzz targets in %s:\n", targetfile.c_str());
+                for (auto sf : targets) {
+                    printf("  %s (line %d)\n", string(sf->name).c_str(), sf->line.line);
+                }
+            }
+            return 0;
+        }
+
+        if (targets.empty()) {
+            fprintf(stderr, "no fuzz targets found in %s (mark with 'fuzz fn' or prefix with 'fuzz_')\n",
+                    targetfile.c_str());
+            return 1;
+        }
+
+        SFunction *chosen = nullptr;
+        if (fuzz_target.empty()) {
+            if (targets.size() == 1) {
+                chosen = targets[0];
+            } else {
+                fprintf(stderr, "multiple fuzz targets found in %s; specify which with --target <name>:\n",
+                        targetfile.c_str());
+                for (auto sf : targets) {
+                    fprintf(stderr, "  %s\n", string(sf->name).c_str());
+                }
+                return 1;
+            }
+        } else {
+            for (auto sf : targets) {
+                if (sf->name == fuzz_target || sf->qname == fuzz_target) {
+                    chosen = sf;
+                    break;
+                }
+            }
+            if (!chosen) {
+                fprintf(stderr, "fuzz target '%s' not found in %s\n", fuzz_target.c_str(), targetfile.c_str());
+                return 1;
+            }
+        }
+
+        enum ParamKind { PK_NONE, PK_BYTES, PK_STRING, PK_DRIVER };
+        ParamKind pkind = PK_NONE;
+
+        if (chosen->params.size() > 1) {
+            fprintf(stderr, "fuzz target '%s' has %d parameters; fuzz targets must take 0 or 1 parameter\n",
+                    string(chosen->name).c_str(), (int)chosen->params.size());
+            return 1;
+        }
+
+        if (chosen->params.size() == 1) {
+            string ptype;
+            if (chosen->params[0].type) chosen->params[0].type->Dump(ptype);
+            if (ptype.find("Driver") != string::npos) {
+                pkind = PK_DRIVER;
+            } else if (ptype.find("string") != string::npos) {
+                pkind = PK_STRING;
+            } else if (ptype.find("u8") != string::npos || ptype.empty()) {
+                pkind = PK_BYTES;
+            } else {
+                fprintf(stderr, "unsupported parameter type '%s' in fuzz target '%s' (expected 'const u8[:]', 'string', or '&Driver')\n",
+                        ptype.c_str(), string(chosen->name).c_str());
+                return 1;
+            }
+        }
+
+        bool returns_bool = false;
+        if (chosen->has_rets && !chosen->rets.empty()) {
+            string rtype;
+            chosen->rets[0]->Dump(rtype);
+            if (rtype == "bool") returns_bool = true;
+        }
+
+        string call;
+        string worker_body;
+        if (pkind == PK_DRIVER) {
+            worker_body += "    var d = make_driver_from_bytes(tc.data[..], 64);\n";
+            call = cat(chosen->qname, "(d)");
+        } else if (pkind == PK_STRING) {
+            call = cat(chosen->qname, "(tc.data[..])");
+        } else if (pkind == PK_BYTES) {
+            call = cat(chosen->qname, "(tc.data[..])");
+        } else {
+            call = cat(chosen->qname, "()");
+        }
+
+        if (returns_bool) {
+            worker_body += cat("    if !", call, " {\n        abort(\"fuzz target returned false\");\n    }\n");
+        } else {
+            worker_body += cat("    ", call, ";\n");
+        }
+
+        string main_body = "    var c = check().fuzz().verbose();\n";
+        if (fuzz_timeout > 0) {
+            Append(main_body, "    c = timeout_ms(c, ", (int64_t)fuzz_timeout * 1000, ");\n");
+        }
+        if (fuzz_max_len > 0) {
+            Append(main_body, "    c = max_len(c, ", fuzz_max_len, ");\n");
+        }
+        if (fuzz_seed != 0) {
+            Append(main_body, "    c = seed(c, ", fuzz_seed, ");\n");
+        }
+        if (!fuzz_replay.empty()) {
+            if (FileExists(fuzz_replay)) {
+                Append(main_body, "    c = replay(c, \"", fuzz_replay, "\");\n");
+            } else {
+                string hex = fuzz_replay;
+                if (hex.rfind("0x", 0) == 0 || hex.rfind("0X", 0) == 0) hex = hex.substr(2);
+                string cleanhex;
+                for (char c : hex) if (isxdigit((unsigned char)c)) cleanhex += c;
+                main_body += "    let replay_arr: u8[] = [";
+                for (size_t k = 0; k + 1 < cleanhex.size(); k += 2) {
+                    if (k > 0) main_body += ", ";
+                    auto byte_val = (unsigned)strtoul(cleanhex.substr(k, 2).c_str(), nullptr, 16);
+                    Append(main_body, byte_val);
+                }
+                main_body += "];\n    c = replay_bytes(c, replay_arr[..]);\n";
+            }
+        }
+        if (!fuzz_corpus_dir.empty()) {
+            Append(main_body, "    c = crash_file(c, \"", fuzz_corpus_dir, "/crash.bin\");\n");
+        }
+        main_body += "    for_each_contained(c, _fuzz_worker);\n";
+
+        auto target_stem = PathStem(targetfile);
+        auto harness_file = cat(DirOf(targetfile), ".goose_fuzz_", target_stem, ".goose");
+        string harness = cat(
+            "/* Synthesized by goose fuzz for target ", chosen->qname, " */\n",
+            "import proptest;\n",
+            "import .", target_stem, ";\n\n",
+            "thread_fn _fuzz_worker(tc: ContainedInput) {\n",
+            worker_body,
+            "}\n\n",
+            "fn main() {\n",
+            main_body,
+            "}\n"
+        );
+
+        if (!WriteFileMakingDirs(harness_file, harness)) {
+            fprintf(stderr, "cannot write fuzz harness file: %s\n", harness_file.c_str());
+            return 1;
+        }
+
+        if (buildopts.exe.empty()) {
+            builddir = ProgramBuildDir(harness_file);
+            std::error_code ec;
+            filesystem::create_directories(filesystem::path(builddir), ec);
+            buildopts.exe = cat(builddir, "/fuzz_", target_stem, "_", chosen->name);
+            #ifdef _WIN32
+            buildopts.exe += ".exe";
+            #endif
+        }
+
+        auto code = run(harness_file);
+        std::error_code ec;
+        filesystem::remove(filesystem::path(harness_file), ec);
+        if (code != 0 || dryrun) return code;
+
+        string cmd = cat("\"", buildopts.exe, "\"");
+        for (auto &a : progargs) {
+            cmd += " \"";
+            for (char c : a) {
+                if (c == '"') cmd += "\\\"";
+                else cmd += c;
+            }
+            cmd += "\"";
+        }
+        fflush(stdout);
+        fflush(stderr);
+        int status = system(cmd.c_str());
+        int exit_code = 0;
+        #ifdef _WIN32
+        exit_code = status;
+        #else
+        if (WIFEXITED(status)) exit_code = WEXITSTATUS(status);
+        else if (WIFSIGNALED(status)) exit_code = 128 + WTERMSIG(status);
+        else exit_code = status;
+        #endif
+        return exit_code;
+    }
     if (!multitest) return run(files[0]);
     // Each file has an Ast and a compile thread of its own, which is all the
     // state a compile has. The mark goes after a line break of its own, so a

@@ -648,6 +648,7 @@ inline void FnDecl::Dump(string &s, int ind) const {
     if (sf->checkfree && !(sf->isnested && sf->outer && sf->outer->checkfree))
         s += "checkfree ";
     if (sf->issimd) s += "simd ";
+    if (sf->isfuzz) s += "fuzz ";
     if (sf->isinline) s += "inline ";
     if (sf->isrec) s += "recursive ";
     s += sf->isthread ? "thread_fn " : "fn ";

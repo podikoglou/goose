@@ -212,6 +212,7 @@ module.exports = grammar({
     function_modifier: $ => choice(
       'checkfree',
       'simd',
+      'fuzz',
       'inline',
       'recursive',
       seq('export', optional($.string_literal)),

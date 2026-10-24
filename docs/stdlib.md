@@ -19,12 +19,13 @@
 - [audio](#audio)
 - [physics](#physics)
 - [ui](#ui)
+- [proptest](#proptest)
 
 </details>
 
-The standard library has sixteen modules under `stdlib/`: `std`,
+The standard library has seventeen modules under `stdlib/`: `std`,
 `dictionary`, `vec`, `math`, `os`, `ffi`, `binary`, `base64`, `csv`, `json`,
-`regex`, `audio`, `gfx`, `physics`, `ui`, and `exception`. Import each module by name,
+`regex`, `audio`, `gfx`, `physics`, `ui`, `exception`, and `proptest`. Import each module by name,
 for example `import std;`. The compiler locates the library in its source
 tree; use `--stdlib <dir>` or `GOOSE_STDLIB` to select another location.
 Everything is written in Goose except the C behind `os`
@@ -94,7 +95,8 @@ The library uses these conventions:
   §3.9).
 * The `std`, `dictionary`, `vec`, `math`, and `os` names are global;
   `ffi`, `binary`, `base64`, `csv`, `json`, `regex`, `audio`, `gfx`,
-  `physics`, `ui` and `exception` use their own namespaces. A local named `fill` or `count`
+  `physics`, `ui`, `exception`, and `proptest` use their own namespaces (with
+  `proptest` exporting global test execution functions and `Driver` types). A local named `fill` or `count`
   shadows the corresponding global function, causing an error at a call; a
   global variable of such a name does not, since a call names the functions
   past it (spec §11.1).
@@ -2278,3 +2280,160 @@ frame's duration, and the clipboard both ways, pasting the system
 clipboard's text and putting there what a field copied. Both work in the
 screen's pixels, so on a high-density display the ui is as many pixels as
 elsewhere, and smaller, until the program sets a scale.
+
+## proptest
+
+Property-based testing and structure-aware mutation fuzzing. `import proptest;`
+provides automated invariant verification, reproducible pseudo-random inputs,
+high-performance test-case reduction (shrinking), and first-class continuous
+fuzzing via the `goose fuzz` CLI.
+
+### Campaigns and configuration
+
+```goose
+fn check() -> Config
+fn iterations(c: Config, n: i64) -> Config
+fn seed(c: Config, s: u64) -> Config
+fn max_len(c: Config, n: i64) -> Config
+fn max_depth(c: Config, d: i32) -> Config
+fn verbose(c: Config, v: bool = true) -> Config
+fn shrink(c: Config, v: bool = true) -> Config
+fn no_shrink(c: Config) -> Config
+fn shrink_steps(c: Config, n: i64) -> Config
+fn shrink_time_ms(c: Config, ms: i64) -> Config
+fn timeout_ms(c: Config, ms: i64) -> Config
+fn fuzz(c: Config, v: bool = true) -> Config
+fn replay(c: Config, path: const u8[:]) -> Config
+fn replay_bytes(c: Config, raw: const u8[:]) -> Config
+fn crash_file(c: Config, path: const u8[:]) -> Config
+```
+
+`check()` starts a configuration chain with sensible defaults: 1,000 iterations,
+random seed from the platform monotonic clock, max depth 5, max input length 4,096
+bytes, and shrinking enabled with up to 5,000 steps (2,000 ms timeout).
+
+```goose
+import proptest;
+
+fn test_addition_commutative() {
+    check().iterations(5000).for_each() { d =>
+        let a = d.next_i64();
+        let b = d.next_i64();
+        assert(a + b == b + a);
+    };
+}
+```
+
+### The Driver and data generators
+
+A `Driver` provides deterministic entropy to property blocks and fuzz targets:
+either generated on the fly by an internal PRNG, or mapped from an input byte buffer
+during mutation fuzzing, shrinking, and replay.
+
+```goose
+// Primitive generators
+fn next_bool(d: Driver&) -> bool
+fn next_u8(d: Driver&) -> u8
+fn next_u16(d: Driver&) -> u16
+fn next_u32(d: Driver&) -> u32
+fn next_u64(d: Driver&) -> u64
+fn next_i64(d: Driver&) -> i64
+fn next_f32(d: Driver&) -> f32
+fn next_f64(d: Driver&) -> f64
+
+// Range generators
+fn gen_i64_range(d: Driver&, min: i64, max: i64) -> i64
+fn gen_f64_range(d: Driver&, min: f64, max: f64) -> f64
+
+// Slices, collections and strings
+fn gen_u8_array(d: Driver&, min_len: i64, max_len: i64) -> u8[>..]
+fn gen_ascii_string(d: Driver&, min_len: i64, max_len: i64) -> u8[>..]
+fn gen_utf8_string(d: Driver&, min_len: i64, max_len: i64) -> u8[>..]
+
+// Combinators
+fn choose<T>(d: Driver&, items: const T[:]) -> T
+fn frequency(d: Driver&, weights: const i64[:]) -> i64
+```
+
+UFCS applies directly to `Driver`: `d.next_u32()`, `d.int_range(0, 100)`,
+`d.ascii(1, 32)`, `d.utf8(0, 64)`.
+
+```goose
+check().for_each() { d =>
+    let name = d.ascii(1, 16);
+    let score = d.int_range(0, 1000);
+    let active = d.next_bool();
+    // Test invariants on the generated struct...
+};
+```
+
+### Execution and shrinking
+
+`for_each` executes the test campaign. If an assertion or condition fails, the
+shrinker systematically minimizes the failing byte sequence using a 4-stage
+minimizer (tail truncation, power-of-two chunk deletion, little-endian binary
+byte minimization, and bit reduction).
+
+Once minimized, `for_each` prints the minimal failing byte sequence (with hex
+dump) and reproduction instructions, then aborts:
+
+```
+======================== Test Failure ========================
+Property failed at iteration: 341 / 1000
+Iteration seed: 8194337163639886869 (base seed: 12345)
+Shrinking: 64 bytes -> 3 bytes (18 steps)
+Minimal failing bytes (hex):
+0000: 41 42 43                                         |ABC|
+Reproduction:
+  proptest::check().replay_bytes([65, 66, 67][..]).for_each() { d => ... }
+  proptest::check().seed(8194337163639886869).iterations(1).for_each() { d => ... }
+==============================================================
+```
+
+### First-class fuzzing: `goose fuzz`
+
+Goose provides first-class support for declaring and running continuous fuzz
+campaigns without manual harness boilerplate.
+
+Functions marked with the `fuzz fn` modifier or named with the `fuzz_` prefix are
+automatically recognized as fuzz targets:
+
+```goose
+// Raw byte slice target (libFuzzer style)
+fuzz fn fuzz_parser(data: const u8[:]) {
+    var p = make_parser(data);
+    let _ = p.parse_document();
+}
+
+// Structured driver target
+fuzz fn fuzz_transaction(d: Driver&) {
+    let amount = d.int_range(1, 1000000);
+    let account = d.ascii(4, 12);
+    process_transfer(account, amount);
+}
+```
+
+Run `goose fuzz <file>` to discover and fuzz targets:
+
+```bash
+# Discover all fuzz targets declared in a file
+goose fuzz parser.goose --list-targets
+
+# Start continuous fuzzing on the target
+goose fuzz parser.goose --target fuzz_parser
+
+# Fuzz with a maximum duration of 60 seconds and custom seed
+goose fuzz parser.goose --timeout 60 --seed 0x1234
+
+# Replay a minimal crash artifact or hex string directly
+goose fuzz parser.goose --replay crash.bin
+goose fuzz parser.goose --replay "414243"
+
+# Save discovered crashes to a specific directory
+goose fuzz parser.goose --corpus-dir ./fuzz_corpus
+```
+
+`goose fuzz` automatically synthesizes an isolated worker harness using
+`thread_spawn_contained`. When a worker panics, asserts, encounters an
+out-of-bounds index, or divides by zero, the trap is contained, recorded, and
+shrunk to the minimal reproduction case without crashing the fuzzer process.
