@@ -59,6 +59,15 @@ fn main() {
     show("(?s:.)b", "\nb");
     show("a.c", "abc a\nc");
 
+    // Anchors and word boundaries.
+    show("^abc", "abc abc");
+    show("abc$", "abc abc");
+    show("^abc$", "abc");
+    show("^abc$", "xabc");
+    show("^\\w+$", "hello_world");
+    show("\\bfn\\b", "fn prefix_fn fnames fn");
+    show("\\Bfn", "prefix_fn fn");
+
     // Groups and flags.
     show("(a)(b)?(c)", "ac abc");
     show("(?:ab)+", "ababa");
@@ -132,7 +141,7 @@ fn main() {
 
     // Errors, and the regex a malformed pattern gives.
     let bad = ["[", "[a", "(", "(a", "a)", "*a", "+", "a{", "a{1", "a{x}", "a{2,1}", "a{1001}",
-               "\\", "\\q", "\\xg1", "[z-a]", "(?x)", "(?P<n", "[[a]]", "[a--b]", "[\\w&&x]", "^a", "a$",
+               "\\", "\\q", "\\xg1", "[z-a]", "(?x)", "(?P<n", "[[a]]", "[a--b]", "[\\w&&x]",
                "(?:a{1000}){20}", "[ab]*a[ab]{20}"];
     for p in bad {
         var err: u8[>..] = [];
@@ -153,6 +162,8 @@ fn main() {
     print(out);
     let s, e = regex::find(re, "no match");
     print(s, " ", e, " ", regex::matches(re, "{{a}}"), " ", regex::matches(re, "{{}}"));
+    let at_s, at_e = regex::find_at(re, "a {{b}} c {{d}}", 6);
+    print(regex::num_groups(re), " ", regex::is_nullable(re), " ", at_s, " ", at_e);
     let opt = regex::compile("(a)|(b)");
     regex::each_captures(opt, "ab") { c =>
         print(regex::group(c, 0), " [", regex::group(c, 1), "] [", regex::group(c, 2), "] ",

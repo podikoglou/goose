@@ -1000,7 +1000,9 @@ Regular expressions with the syntax and the matching rules of Rust's
 fn compile(pattern: u8[:]) -> Regex                  // aborts on a malformed pattern
 fn compile(pattern: u8[:], err: u8[>..]&) -> Regex   // appends the error to err instead
 fn find(re: Regex&, text: u8[:]) -> i64, i64         // the first match's start and end; -1, -1
+fn find_at(re: Regex&, text: u8[:], at: i64) -> i64, i64 // match starting at or after at
 fn matches(re: Regex&, text: u8[:]) -> bool          // whether there is a match
+fn matches_at(re: Regex&, text: u8[:], at: i64) -> bool // whether there is a match at or after at
 fn count(re: Regex&, text: u8[:]) -> i64             // the matches each_match finds
 fn each_match<F>(re: Regex&, text: u8[:])            // F(start, end) for each match
 fn each_captures<F>(re: Regex&, text: u8[:])         // F(caps: Captures) for each match
@@ -1008,6 +1010,8 @@ fn format_replaced<F>(out: u8[>..]&, re: Regex&, text: u8[:])
                                                      // text, each match replaced by F(caps)
 struct Captures { text: const u8[:], slots: const i64[:] }
 fn group(c: Captures, k: i64) -> const u8[:]         // group k's text; empty if it took no part
+fn num_groups(re: Regex&) -> i64                     // total capture groups (including whole match)
+fn is_nullable(re: Regex&) -> bool                   // whether the empty string matches
 ```
 
 Matching is leftmost-first, as in the crate, Perl and most engines: the
@@ -1029,16 +1033,16 @@ and their complements `\D \W \S`, in classes too; escapes `\n \t \r \f \v
 \xHH` and any punctuation (`\.`, `\\`); groups `(...)`, `(?:...)` and named
 `(?P<name>...)` or `(?<name>...)`, whose names are accepted and not used;
 flags `i` (letters match either case) and `s`, as `(?i)` to the end of the
-group or `(?i:...)` within, `(?-i)` to turn one off; alternation `|`; and
-`* + ? {n} {n,} {n,m}`, each lazy with a `?` after it. The classes and the
-case folding are ASCII, as the crate's are with Unicode off. Anchors and word
-boundaries (`^ $ \A \z \b \B`), class set operations (`&& -- ~~`), nested
-classes, Unicode classes and the other flags are not supported, and
-`compile` reports them as errors: `regex: anchors are not supported at
-offset 0 in ^a`. Two known differences from the crate are in the module's
-header: an alternation whose branches share a repeating prefix means here
-what it says, as in Perl and RE2, and groups at the end of a pattern under a
-`{0}` are kept.
+group or `(?i:...)` within, `(?-i)` to turn one off; alternation `|`;
+`* + ? {n} {n,} {n,m}`, each lazy with a `?` after it; and anchors and word
+boundaries `^` (start of text, or after `\n`), `$` (end of text, or before
+`\n`), `\b` (ASCII word boundary), and `\B` (not word boundary). The classes
+and the case folding are ASCII, as the crate's are with Unicode off. Class
+set operations (`&& -- ~~`), nested classes, Unicode classes and the other
+flags are not supported. Two known differences from the crate are in the
+module's header: an alternation whose branches share a repeating prefix means
+here what it says, as in Perl and RE2, and groups at the end of a pattern
+under a `{0}` are kept.
 
 `compile` builds complete DFAs up front, one that finds where a match ends
 and one over the reversed pattern that finds where it starts, so a search

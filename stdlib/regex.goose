@@ -17,12 +17,12 @@
 // see, come from their fixed places in the match where the pattern gives
 // them one, and from a backtracker that runs over the match alone where not.
 //
-// The engine works on bytes: classes, `\d`, `\w`, `\s` and case folding are
-// ASCII, which is what the crate's Unicode classes come to on ASCII text.
-// Not supported: anchors and word boundaries (`^ $ \A \z \b \B`), class
-// set operations, and patterns too large to compile: whose programs would
-// need more than MAX_INSTS instructions, or whose DFAs more than MAX_STATES
-// states or more than MAX_WORK steps to build.
+// The engine works on bytes: classes, `\d`, `\w`, `\s`, anchors and word
+// boundaries (`^ $ \b \B`), and case folding are ASCII, which is what the
+// crate's Unicode classes come to on ASCII text.
+// Not supported: class set operations, and patterns too large to compile:
+// whose programs would need more than MAX_INSTS instructions, or whose DFAs
+// more than MAX_STATES states or more than MAX_WORK steps to build.
 //
 // Known differences: the crate factors a prefix that every alternative
 // shares out of an alternation, `a*ab|a*c?` becoming `a*(?:ab|c?)`, which
@@ -43,6 +43,11 @@ let MAX_INSTS = 10000;      // per program
 let MAX_PREFIX = 8;         // leading byte positions the prefix test considers
 let MAX_REPEAT = 1000;      // the largest count a {n,m} may give
 
+let ASSERT_START = 0;       // ^ (start of text, or after \n)
+let ASSERT_END = 1;         // $ (end of text, or before \n)
+let ASSERT_WORD = 2;        // \b (word boundary)
+let ASSERT_NOT_WORD = 3;    // \B (not word boundary)
+
 // --- the syntax tree ---------------------------------------------------------
 
 // A node of the parsed pattern; children are indices into the node pool.
@@ -53,6 +58,7 @@ enum Node {
     Alt { first: i32, second: i32 },                        // first preferred
     Repeat { sub: i32, min: i32, max: i32, greedy: bool },  // max -1: unbounded
     Group { sub: i32, index: i32 },                         // a capture group
+    Assert { kind: i32 },
 }
 
 // --- the program ---------------------------------------------------------------
@@ -65,6 +71,7 @@ enum Inst {
     Split { first: i32, second: i32 },      // fork; the first thread is preferred
     Save { slot: i32, next: i32 },          // record the position in a capture slot
     Match,
+    Assert { kind: i32, next: i32 },
 }
 
 // A DFA over byte classes. States are numbered with the dead state first,
@@ -93,6 +100,7 @@ struct Regex {
     groups: i64,            // capture groups, group 0 being the whole match
     nullable: bool,         // whether the empty string matches
     placed: bool,           // whether every group has a fixed place
+    has_assert: bool,       // whether pattern has ^, $, \b, \B
     entry: i32,             // where the program starts an anchored match
     classes: u8[256],       // byte -> its column in the DFAs
     skip: Skip,
@@ -116,6 +124,7 @@ fn add_range(s: bool[256]&, lo: u8, hi: u8) {
 }
 
 fn is_letter(b: u8) -> bool { (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') }
+fn is_word_byte(b: u8) -> bool { is_letter(b) || (b >= '0' && b <= '9') || b == '_' }
 
 // Adds the other case of every ASCII letter in the set.
 fn fold_case(s: bool[256]&) {
@@ -188,7 +197,7 @@ fn nothing() -> Regex {
     let dead = Dfa { start: 0, match_end: 1, special: 1, trans: [0] };
     let none: ByteSet = byte_set([false; 256]);
     return Regex {
-        groups: 1, nullable: false, placed: false, entry: 0, classes: [0; 256], skip: Skip.Scan,
+        groups: 1, nullable: false, placed: false, has_assert: false, entry: 0, classes: [0; 256], skip: Skip.Scan,
         filter: Prefilter { len: 0, at1: 0, at2: 0, set1: none, set2: none }, inner: none,
         fwd: dead, rev: dead, before: dead, places: [], prog: [Inst.Match], sets: [],
     };
@@ -201,6 +210,7 @@ fn build(pattern: u8[:], err: u8[>..]&, aborts: bool) -> Regex {
     var fold = false;           // (?i): letters match either case
     var dot_nl = false;         // (?s): `.` matches a newline too
     var groups = 1;
+    var has_assert = false;
 
     // Ends the compile at an error: aborts with the message where `aborts`
     // says so, and otherwise appends it to `err` and returns a regex that
@@ -307,9 +317,14 @@ fn build(pattern: u8[:], err: u8[>..]&, aborts: bool) -> Regex {
     // An escape outside a class.
     fn escape() -> i32 {
         var s: bool[256] = [false; 256];
-        if more() && add_perl_class(s, pattern[pos]) {
-            pos++;
-            return add_bytes(s);
+        if more() {
+            let c = pattern[pos];
+            if c == 'b' { pos++; has_assert = true; return add(Node.Assert { kind: ASSERT_WORD }); }
+            if c == 'B' { pos++; has_assert = true; return add(Node.Assert { kind: ASSERT_NOT_WORD }); }
+            if add_perl_class(s, c) {
+                pos++;
+                return add_bytes(s);
+            }
         }
         return literal(escape_byte());
     }
@@ -360,7 +375,8 @@ fn build(pattern: u8[:], err: u8[>..]&, aborts: bool) -> Regex {
     recursive fn parse_atom() -> i32 {
         let c = pattern[pos];
         guard c != '*' && c != '+' && c != '?' && c != '{' else { return fail("nothing to repeat"); }
-        guard c != '^' && c != '$' else { return fail("anchors are not supported"); }
+        if c == '^' { pos++; has_assert = true; return add(Node.Assert { kind: ASSERT_START }); }
+        if c == '$' { pos++; has_assert = true; return add(Node.Assert { kind: ASSERT_END }); }
         pos++;
         if c == '(' { return group(); }
         if c == '[' { return class(); }
@@ -449,6 +465,7 @@ fn build(pattern: u8[:], err: u8[>..]&, aborts: bool) -> Regex {
             Alt a => nullable(a.first) || nullable(a.second),
             Group g => nullable(g.sub),
             Repeat r => r.min == 0 || nullable(r.sub),
+            Assert => true,
         }
     }
 
@@ -458,6 +475,7 @@ fn build(pattern: u8[:], err: u8[>..]&, aborts: bool) -> Regex {
         match nodes[n] {
             Empty => { return next; },
             Bytes b => { return push(prog, Inst.Byte { set: b.set, next: next }); },
+            Assert a => { return push(prog, Inst.Assert { kind: a.kind, next: next }); },
             Cat c => {
                 if reverse { return emit(prog, c.second, emit(prog, c.first, next, reverse), reverse); }
                 return emit(prog, c.first, emit(prog, c.second, next, reverse), reverse);
@@ -521,6 +539,7 @@ fn build(pattern: u8[:], err: u8[>..]&, aborts: bool) -> Regex {
                 if r.min == r.max && x >= 0 { x * r.min } else { -1 }
             },
             Group g => fixed_len(g.sub),
+            Assert => 0,
         }
     }
 
@@ -533,6 +552,7 @@ fn build(pattern: u8[:], err: u8[>..]&, aborts: bool) -> Regex {
             Alt a => { alphabet(a.first, s); alphabet(a.second, s); },
             Repeat r => { if r.max != 0 { alphabet(r.sub, s); } },
             Group g => { alphabet(g.sub, s); },
+            Assert => {},
         }
     }
 
@@ -541,6 +561,7 @@ fn build(pattern: u8[:], err: u8[>..]&, aborts: bool) -> Regex {
     recursive fn first_bytes(n: i32, s: bool[256]&) -> bool {
         match nodes[n] {
             Empty => true,
+            Assert => true,
             Bytes b => {
                 for c in 256 { if sets[b.set][c] { s[c] = true; } }
                 false
@@ -670,23 +691,25 @@ fn build(pattern: u8[:], err: u8[>..]&, aborts: bool) -> Regex {
     let classes = byte_classes(sets);
     let scans = skip != Skip.Scan;
     var too_big = false;
+    let dead = Dfa { start: 0, match_end: 1, special: 1, trans: [0] };
     let re = Regex {
         groups: groups,
         nullable: prefix.len == 0,
         placed: placed,
+        has_assert: has_assert,
         entry: entry,
         classes: classes,
         skip: skip,
         filter: filter,
         inner: byte_set(inner),
-        fwd: build_dfa(prog, sets, classes, head, true, scans, too_big),
-        rev: build_dfa(rprog, sets, classes, rentry, false, false, too_big),
-        before: build_dfa(bprog, sets, classes, bentry, false, false, too_big),
+        fwd: if has_assert { copy(dead) } else { build_dfa(prog, sets, classes, head, true, scans, too_big) },
+        rev: if has_assert { copy(dead) } else { build_dfa(rprog, sets, classes, rentry, false, false, too_big) },
+        before: if has_assert { copy(dead) } else { build_dfa(bprog, sets, classes, bentry, false, false, too_big) },
         places: copy(places),
         prog: copy(prog),
         sets: copy(sets),
     };
-    if too_big { stop(str("regex: the pattern's DFA would be too large: ", pattern)); }
+    if !has_assert && too_big { stop(str("regex: the pattern's DFA would be too large: ", pattern)); }
     return re;
 }
 
@@ -717,6 +740,7 @@ fn prefix_sets(prog: Inst[:], sets: (bool[256])[:], entry: i32) -> (bool[256])[>
                 Byte => next.push(pc),
                 Split sp => { stack.push(sp.second); stack.push(sp.first); },
                 Save sv => stack.push(sv.next),
+                Assert a => stack.push(a.next),
                 Match => { matched = true; },
             }
         }
@@ -846,6 +870,7 @@ fn build_dfa(prog: Inst[:], sets: (bool[256])[:], classes: u8[256], start_pc: i3
                 Byte => list.push(pc),
                 Split sp => { stack.push(sp.second); stack.push(sp.first); },
                 Save sv => stack.push(sv.next),
+                Assert a => stack.push(a.next),
                 Match => {
                     matched = true;
                     if leftmost { stack.clear(); return true; }
@@ -1020,64 +1045,6 @@ fn scan_back(re: Regex&, d: Dfa&, text: u8[:], lo: i64, end: i64) -> i64 {
     return first;
 }
 
-// Where the match that ends at `end`, and starts at or after `at`, starts.
-fn find_start(re: Regex&, text: u8[:], at: i64, end: i64) -> i64 { scan_back(re, re.rev, text, at, end) }
-
-// The leftmost-first match: where it starts and where it ends; -1, -1 if
-// there is none.
-fn find(re: Regex&, text: u8[:]) -> i64, i64 {
-    let e = find_end(re, text, 0);
-    if e < 0 { return -1, -1; }
-    return find_start(re, text, 0, e), e;
-}
-
-// Whether text holds a match, as the crate's is_match: the reverse DFA,
-// which finds where a match starts, is not run.
-fn matches(re: Regex&, text: u8[:]) -> bool { find_end(re, text, 0) >= 0 }
-
-// F(start, end) for every match, left to right, as the regex crate's
-// find_iter yields them: no two overlap, and no empty match comes where the
-// previous match ended.
-fn each_match<F>(re: Regex&, text: u8[:]) {
-    var at = 0;
-    var last_end = -1;
-    while at <= text.len {
-        var e = find_end(re, text, at);
-        if e < 0 { break; }
-        var s = find_start(re, text, at, e);
-        if s == e && e == last_end {
-            if at == text.len { break; }
-            e = find_end(re, text, at + 1);
-            if e < 0 { break; }
-            s = find_start(re, text, at + 1, e);
-        }
-        F(s, e);
-        at = e;
-        last_end = e;
-    }
-}
-
-// The number of matches: what find_iter(text).count() counts. A match that
-// cannot be empty is counted from its end alone, as the crate's count()
-// does: only a match's start takes the reverse DFA.
-fn count(re: Regex&, text: u8[:]) -> i64 {
-    var n = 0;
-    if re.nullable {
-        each_match(re, text) { s, e => n++; };
-        return n;
-    }
-    var at = 0;
-    loop {
-        let e = find_end(re, text, at);
-        if e < 0 { break; }
-        n++;
-        at = e;
-    }
-    return n;
-}
-
-// --- capture groups --------------------------------------------------------------------
-
 // The capture groups of a match: group k spans slots[2k]..slots[2k + 1] of
 // the text, or both are -1 if it took no part in the match. Group 0 is the
 // match, and the others are numbered by their opening parentheses.
@@ -1088,6 +1055,22 @@ fn group(c: Captures, k: i64) -> const u8[:] {
     let s = c.slots[2 * k];
     if s < 0 { return c.text[0..0]; }
     return c.text[s..c.slots[2 * k + 1]];
+}
+
+fn test_assert(kind: i32, text: u8[:], i: i64) -> bool {
+    if kind == ASSERT_START {
+        return i == 0 || (i > 0 && text[i - 1] == '\n');
+    }
+    if kind == ASSERT_END {
+        return i == text.len || (i < text.len && text[i] == '\n');
+    }
+    if kind == ASSERT_WORD || kind == ASSERT_NOT_WORD {
+        let prev_word = i > 0 && is_word_byte(text[i - 1]);
+        let curr_word = i < text.len && is_word_byte(text[i]);
+        let is_wb = prev_word != curr_word;
+        return if kind == ASSERT_WORD { is_wb } else { !is_wb };
+    }
+    return false;
 }
 
 // A step of the backtracking search: a thread to explore, or a capture slot
@@ -1134,6 +1117,10 @@ fn backtrack(re: Regex&, text: u8[:], start: i64, end: i64, slots: i64[:], visit
                             slots[sv.slot] = i;
                             pc = sv.next;
                         },
+                        Assert a => {
+                            guard test_assert(a.kind, text, i) else { break; }
+                            pc = a.next;
+                        },
                         Match => { return; },
                     }
                 }
@@ -1142,15 +1129,126 @@ fn backtrack(re: Regex&, text: u8[:], start: i64, end: i64, slots: i64[:], visit
     }
 }
 
+// Search for leftmost-first match when pattern has assertions.
+fn find_assert(re: Regex&, text: u8[:], at: i64) -> i64, i64 {
+    var slots: i64[>..] = [];
+    slots.resize(2 * re.groups, -1);
+    var visited: bool[>..] = [];
+    var p = at;
+    while p <= text.len {
+        backtrack(re, text, p, text.len, slots, visited);
+        if slots[0] >= 0 {
+            return slots[0], slots[1];
+        }
+        p++;
+    }
+    return -1, -1;
+}
+
 // The capture slots of the match [start, end): from the groups' places
 // where every group has a fixed one, and by backtracking where not.
 fn captures(re: Regex&, text: u8[:], start: i64, end: i64, slots: i64[:], visited: bool[>..]&) {
-    guard re.placed else { backtrack(re, text, start, end, slots, visited); return; }
+    guard re.placed && !re.has_assert else { backtrack(re, text, start, end, slots, visited); return; }
     for &p, k in re.places {
         slots[2 * k] = if p.start_back { end - p.start } else { start + p.start };
         slots[2 * k + 1] = if p.end_back { end - p.end } else { start + p.end };
     }
 }
+
+// Where the match that ends at `end`, and starts at or after `at`, starts.
+fn find_start(re: Regex&, text: u8[:], at: i64, end: i64) -> i64 { scan_back(re, re.rev, text, at, end) }
+
+// The leftmost-first match starting at or after `at`: where it starts and
+// where it ends; -1, -1 if there is none.
+fn find_at(re: Regex&, text: u8[:], at: i64) -> i64, i64 {
+    guard at >= 0 && at <= text.len else { return -1, -1; }
+    if re.has_assert { return find_assert(re, text, at); }
+    let e = find_end(re, text, at);
+    if e < 0 { return -1, -1; }
+    return find_start(re, text, at, e), e;
+}
+
+// The leftmost-first match: where it starts and where it ends; -1, -1 if
+// there is none.
+fn find(re: Regex&, text: u8[:]) -> i64, i64 { return find_at(re, text, 0); }
+
+// Whether text holds a match, as the crate's is_match: the reverse DFA,
+// which finds where a match starts, is not run.
+fn matches(re: Regex&, text: u8[:]) -> bool {
+    if re.has_assert {
+        let s, e = find_assert(re, text, 0);
+        return s >= 0;
+    }
+    return find_end(re, text, 0) >= 0;
+}
+
+// Whether text holds a match starting at or after `at`.
+fn matches_at(re: Regex&, text: u8[:], at: i64) -> bool {
+    if re.has_assert {
+        let s, e = find_assert(re, text, at);
+        return s >= 0;
+    }
+    return find_end(re, text, at) >= 0;
+}
+
+// F(start, end) for every match, left to right, as the regex crate's
+// find_iter yields them: no two overlap, and no empty match comes where the
+// previous match ended.
+fn each_match<F>(re: Regex&, text: u8[:]) {
+    var at = 0;
+    var last_end = -1;
+    while at <= text.len {
+        var s = -1;
+        var e = -1;
+        if re.has_assert {
+            s, e = find_assert(re, text, at);
+            if e < 0 { break; }
+            if s == e && e == last_end {
+                if at == text.len { break; }
+                s, e = find_assert(re, text, at + 1);
+                if e < 0 { break; }
+            }
+        } else {
+            e = find_end(re, text, at);
+            if e < 0 { break; }
+            s = find_start(re, text, at, e);
+            if s == e && e == last_end {
+                if at == text.len { break; }
+                e = find_end(re, text, at + 1);
+                if e < 0 { break; }
+                s = find_start(re, text, at + 1, e);
+            }
+        }
+        F(s, e);
+        at = e;
+        last_end = e;
+    }
+}
+
+// The number of matches: what find_iter(text).count() counts. A match that
+// cannot be empty is counted from its end alone, as the crate's count()
+// does: only a match's start takes the reverse DFA.
+fn count(re: Regex&, text: u8[:]) -> i64 {
+    var n = 0;
+    if re.nullable || re.has_assert {
+        each_match(re, text) { s, e => n++; };
+        return n;
+    }
+    var at = 0;
+    loop {
+        let e = find_end(re, text, at);
+        if e < 0 { break; }
+        n++;
+        at = e;
+    }
+    return n;
+}
+
+// The number of capture groups, group 0 (whole match) included.
+fn num_groups(re: Regex&) -> i64 { re.groups }
+
+// Whether the empty string matches.
+fn is_nullable(re: Regex&) -> bool { re.nullable }
 
 // F(captures) for every match each_match finds, as the crate's
 // captures_iter yields them. The slots are reused from match to match.
