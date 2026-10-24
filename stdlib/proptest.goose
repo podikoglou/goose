@@ -1841,11 +1841,32 @@ fn ::for_each<F>(c: Config) {
             print("Saved minimal crash artifact to: ", res.saved_crash_file);
         }
         print("Reproduction:");
-        if res.saved_crash_file.len > 0 {
-            print("  proptest::check().replay(\"", res.saved_crash_file, "\").for_each() { d => ... }");
-        }
-        if res.failed_seed != 0 {
-            print("  proptest::check().seed(", res.failed_seed, ").iterations(1).for_each() { d => ... }");
+        let is_cli_fuzz = c.opt_fuzz_source_file.len > 0 && c.opt_fuzz_target_name.len > 0;
+        if is_cli_fuzz {
+            // CLI fuzz target: users never see check().for_each(); give them the goose fuzz command.
+            if res.saved_crash_file.len > 0 {
+                print("  goose fuzz ", c.opt_fuzz_source_file,
+                      " --target ", c.opt_fuzz_target_name,
+                      " --replay ", res.saved_crash_file);
+                if res.shrunk_bytes_len > 0 {
+                    print("  (or paste the hex above into --replay)");
+                }
+            } else if res.shrunk_bytes_len > 0 {
+                print("  goose fuzz ", c.opt_fuzz_source_file,
+                      " --target ", c.opt_fuzz_target_name,
+                      " --replay \"<hex-from-above>\"");
+            } else if res.failed_seed != 0 {
+                print("  goose fuzz ", c.opt_fuzz_source_file,
+                      " --target ", c.opt_fuzz_target_name,
+                      " --seed ", res.failed_seed);
+            }
+        } else {
+            if res.saved_crash_file.len > 0 {
+                print("  proptest::check().replay(\"", res.saved_crash_file, "\").for_each() { d => ... }");
+            }
+            if res.failed_seed != 0 {
+                print("  proptest::check().seed(", res.failed_seed, ").iterations(1).for_each() { d => ... }");
+            }
         }
         print("==============================================================");
         abort("proptest: property check failed");
@@ -1934,9 +1955,17 @@ fn ::for_each_contained<W>(c: Config) {
                 print("  goose fuzz ", c.opt_fuzz_source_file,
                       " --target ", c.opt_fuzz_target_name,
                       " --replay ", res.saved_crash_file);
-            }
-            if res.shrunk_bytes_len > 0 {
-                print("  (or paste the hex above into --replay)");
+                if res.shrunk_bytes_len > 0 {
+                    print("  (or paste the hex above into --replay)");
+                }
+            } else if res.shrunk_bytes_len > 0 {
+                print("  goose fuzz ", c.opt_fuzz_source_file,
+                      " --target ", c.opt_fuzz_target_name,
+                      " --replay \"<hex-from-above>\"");
+            } else if res.failed_seed != 0 {
+                print("  goose fuzz ", c.opt_fuzz_source_file,
+                      " --target ", c.opt_fuzz_target_name,
+                      " --seed ", res.failed_seed);
             }
         } else {
             // In-code proptest: run_contained is user-visible.

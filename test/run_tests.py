@@ -2088,6 +2088,9 @@ def main():
             checks.append(("fuzz --timeout 1", code == 0 and "proptest [fuzz]:" in out, out + err))
             code, out, err = tc.run_capture([exe, "fuzz", str(fuzz_probe), "--target", "fuzz_crash", "--replay", "2a"])
             checks.append(("fuzz --replay", code == 1 and "Replay failed" in out + err, out + err))
+            code, out, err = tc.run_capture([exe, "fuzz", str(fuzz_probe), "--target", "fuzz_crash", "--isolate", "--timeout", "2"])
+            checks.append(("fuzz banner without crash file",
+                           code == 1 and '--replay "<hex-from-above>"' in out, out + err))
         for what, good, text in checks:
             if good:
                 r.ok(f"goose {what}")
