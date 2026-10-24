@@ -1368,6 +1368,13 @@ fn join<T>(out: u8[>..]&, parts: T[:], sep: u8[:]) {
     }
 }
 
+// The parts with sep between them; T any u8 array or slice type.
+fn join<T>(parts: T[:], sep: u8[:]) -> u8[>..] {
+    var out: u8[>..] = [];
+    join(out, parts, sep);
+    return out;
+}
+
 // s with every occurrence of `old` replaced by `with`, appended to out.
 fn format_replaced(out: u8[>..]&, s: u8[:], old: u8[:], with: u8[:]) {
     if old.len == 0 {
@@ -1387,6 +1394,13 @@ fn format_replaced(out: u8[>..]&, s: u8[:], old: u8[:], with: u8[:]) {
         }
     }
     out.append(s[start..]);
+}
+
+// s with every occurrence of `old` replaced by `with`.
+fn replace(s: u8[:], old: u8[:], with: u8[:]) -> u8[>..] {
+    var out: u8[>..] = [];
+    format_replaced(out, s, old, with);
+    return out;
 }
 
 // F(codepoint) for each UTF-8 sequence; malformed bytes yield 0xFFFD.

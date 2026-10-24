@@ -1304,3 +1304,10 @@ fn format_replaced<F>(out: u8[>..]&, re: Regex&, text: u8[:]) {
     };
     out.append(text[last..]);
 }
+
+// text with every match replaced by F(captures).
+fn replace<F>(re: Regex&, text: u8[:]) -> u8[>..] {
+    var out: u8[>..] = [];
+    format_replaced(out, re, text, F);
+    return out;
+}

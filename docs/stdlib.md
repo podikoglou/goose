@@ -347,7 +347,9 @@ fn each_split<F>(s: u8[:], sep: u8[:])
 fn words(s: u8[:]) -> const u8[:][>..]                     // split at runs of ASCII whitespace; no empty words
 fn each_word<F>(s: u8[:])                                  // F(word)
 fn join<T>(out: u8[>..]&, parts: T[:], sep: u8[:])         // T any u8 array/slice type
+fn join<T>(parts: T[:], sep: u8[:]) -> u8[>..]
 fn format_replaced(out: u8[>..]&, s: u8[:], old: u8[:], with: u8[:])
+fn replace(s: u8[:], old: u8[:], with: u8[:]) -> u8[>..]
 fn each_utf8<F>(s: u8[:])                                  // F(codepoint); malformed bytes give 0xFFFD
 fn push_utf8(out: u8[>..]&, cp: i64)
 ```
@@ -1025,6 +1027,7 @@ fn each_match<F>(re: Regex&, text: u8[:])            // F(start, end) for each m
 fn each_captures<F>(re: Regex&, text: u8[:])         // F(caps: Captures) for each match
 fn format_replaced<F>(out: u8[>..]&, re: Regex&, text: u8[:])
                                                      // text, each match replaced by F(caps)
+fn replace<F>(re: Regex&, text: u8[:]) -> u8[>..]
 struct Captures { text: const u8[:], slots: const i64[:] }
 fn group(c: Captures, k: i64) -> const u8[:]         // group k's text; empty if it took no part
 fn num_groups(re: Regex&) -> i64                     // total capture groups (including whole match)
