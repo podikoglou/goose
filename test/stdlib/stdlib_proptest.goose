@@ -145,11 +145,57 @@ fn test_doc_examples() {
     };
 }
 
+fn test_assume_filtering() {
+    // 1. Filtering with assume: odd numbers are discarded
+    var total_tested: i64 = 0;
+    let res = check().iterations(200).run() { d =>
+        let x = d.int_range(0, 100);
+        if d.assume(x % 2 == 0) {
+            assert(x % 2 == 0, "odd numbers must never reach this branch");
+            total_tested += 1;
+            true
+        } else {
+            false
+        }
+    };
+    assert(res.passed, "assume property must pass");
+    assert(res.total_iterations == 200, "all 200 iterations completed");
+    assert(res.discarded_iterations > 0, "some odd numbers were discarded");
+    assert(total_tested == 200, "tested exactly 200 valid cases");
+
+    // 2. Statement assume: even when property expression is false on discarded input,
+    // it is treated as a discard, not a failure.
+    let res_stmt = check().iterations(100).run() { d =>
+        let x = d.int_range(0, 100);
+        d.assume(x % 2 == 0);
+        x % 2 == 0
+    };
+    assert(res_stmt.passed, "statement assume must not fail even when property expression is false");
+    assert(res_stmt.discarded_iterations > 0, "statement assume discarded cases");
+
+    // 3. Discard cap: impossible assumption gives up safely without hanging
+    let res_impossible = check().iterations(50).max_discards(100).run() { d =>
+        d.assume(false);
+        true
+    };
+    assert(!res_impossible.passed, "impossible assume must fail by hitting discard cap");
+    assert(res_impossible.discarded_iterations >= 100, "discard count reached cap");
+
+    // 4. filter alias
+    let res_filter = check().iterations(50).run() { d =>
+        let n = d.int_range(1, 10);
+        d.filter(n > 5);
+        n > 5
+    };
+    assert(res_filter.passed, "filter alias works as assume");
+}
+
 fn main() {
     test_driver_modes();
     test_generators();
     test_properties();
     test_shrinking();
     test_doc_examples();
+    test_assume_filtering();
     print("proptest: all properties, generators, drivers and shrinking passed");
 }

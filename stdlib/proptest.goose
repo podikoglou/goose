@@ -45,6 +45,7 @@ struct Config {
     opt_replay_bytes:   const u8[:] = "",
     opt_fuzz_source_file: const u8[:] = "", // set by CLI harness: the .goose source file
     opt_fuzz_target_name: const u8[:] = "", // set by CLI harness: the fuzz target function name
+    opt_max_discards:   i64 = 0,            // maximum inputs to discard via assume() before giving up
 }
 
 type ::Config = proptest::Config;
@@ -91,6 +92,9 @@ fn ::fuzz_source_file(var c: Config, path: const u8[:]) -> Config {
 fn ::fuzz_target_name(var c: Config, name: const u8[:]) -> Config {
     c.opt_fuzz_target_name = name; c
 }
+fn ::max_discards(var c: Config, n: i64) -> Config {
+    c.opt_max_discards = n; c
+}
 
 // Namespaced mirrors
 fn iterations(var c: Config, n: i64) -> Config        { ::iterations(c, n) }
@@ -114,6 +118,7 @@ fn replay(var c: Config, path: const u8[:]) -> Config { ::replay(c, path) }
 fn replay_bytes(var c: Config, raw: const u8[:]) -> Config { ::replay_bytes(c, raw) }
 fn fuzz_source_file(var c: Config, path: const u8[:]) -> Config { ::fuzz_source_file(c, path) }
 fn fuzz_target_name(var c: Config, name: const u8[:]) -> Config { ::fuzz_target_name(c, name) }
+fn max_discards(var c: Config, n: i64) -> Config { ::max_discards(c, n) }
 
 // Queries on Config.
 fn ::is_replay(c: Config) -> bool                     { c.opt_has_replay }
@@ -136,6 +141,14 @@ fn ::shrink_time_ms_or_default(c: Config) -> i64      { if c.opt_shrink_time_ms 
 fn ::is_fuzz(c: Config) -> bool                       { c.opt_fuzz }
 fn ::timeout_ms_or_default(c: Config) -> i64          { if c.opt_timeout_ms > 0 { c.opt_timeout_ms } else { 0 } }
 fn ::corpus_size_or_default(c: Config) -> i64         { if c.opt_corpus_size > 0 { c.opt_corpus_size } else { 64 } }
+fn ::max_discards_or_default(c: Config) -> i64 {
+    if c.opt_max_discards > 0 {
+        c.opt_max_discards
+    } else {
+        let n = iterations_or_default(c);
+        if n < 100 { 1000 } else { n * 10 }
+    }
+}
 
 // ---- Driver ----------------------------------------------------------------
 
@@ -152,6 +165,7 @@ struct Driver {
     iteration_seed: u64,
     record_mode:    bool,
     exhausted:      bool,
+    assumed_false:  bool,
     recorded:       u8[>..],
 }
 
@@ -170,6 +184,7 @@ fn driver(iteration_seed: u64 = 0, max_depth: i32 = 5) -> Driver {
         iteration_seed: s,
         record_mode:    false,
         exhausted:      false,
+        assumed_false:  false,
         recorded:       [],
     }
 }
@@ -190,6 +205,7 @@ fn recording_driver(iteration_seed: u64 = 0, max_depth: i32 = 5) -> Driver {
         iteration_seed: s,
         record_mode:    true,
         exhausted:      false,
+        assumed_false:  false,
         recorded:       [],
     }
 }
@@ -209,6 +225,7 @@ fn driver_from_bytes(bytes: const u8[:], max_depth: i32 = 5) -> Driver {
         iteration_seed: 0,
         record_mode:    false,
         exhausted:      false,
+        assumed_false:  false,
         recorded:       [],
     }
 }
@@ -230,6 +247,45 @@ fn ::make_driver_from_bytes(bytes: const u8[:], max_depth: i32) -> proptest::Dri
 fn ::has_bytes(d: Driver&) -> bool {
     if !d.has_buf { return true; }
     d.cursor < d.buf.len
+}
+
+// assume signals that a generated input does not satisfy a precondition.
+// The current iteration is discarded (not counted as a failure or a pass)
+// and the run loop retries with a fresh input, up to the discard cap.
+// Mirrors Hypothesis assume() and QuickCheck (==>).
+//
+// Usage:
+//   check().for_each() { d =>
+//       let x = d.gen_i64();
+//       d.assume(x != 0);
+//       100 / x != 0
+//   };
+//
+// Can also be used as a guard expression:
+//   if !d.assume(x != 0) { return true; }
+fn ::assume(d: Driver&, cond: bool) -> bool {
+    if !cond {
+        d.assumed_false = true;
+    }
+    cond
+}
+fn assume(d: Driver&, cond: bool) -> bool {
+    ::assume(d, cond)
+}
+
+// Synonym for assume.
+fn ::filter(d: Driver&, cond: bool) -> bool {
+    ::assume(d, cond)
+}
+fn filter(d: Driver&, cond: bool) -> bool {
+    ::filter(d, cond)
+}
+
+fn ::is_discarded(d: Driver&) -> bool {
+    d.assumed_false
+}
+fn is_discarded(d: Driver&) -> bool {
+    ::is_discarded(d)
 }
 
 fn ::next_u8(d: Driver&) -> u8 {
@@ -831,7 +887,7 @@ fn ::shrink_bytes<F>(initial_bytes: const u8[:], max_depth: i32, max_steps: i64,
         steps += 1;
         var d0 = make_driver_from_bytes(current[0..0], max_depth);
         let ok0 = F(&d0);
-        if !ok0 {
+        if !ok0 && !d0.assumed_false {
             high = 0;
         } else {
             low = 1;
@@ -840,7 +896,7 @@ fn ::shrink_bytes<F>(initial_bytes: const u8[:], max_depth: i32, max_steps: i64,
                 steps += 1;
                 var dmid = make_driver_from_bytes(current[0..mid], max_depth);
                 let ok_mid = F(&dmid);
-                if !ok_mid {
+                if !ok_mid && !dmid.assumed_false {
                     high = mid;
                 } else {
                     low = mid + 1;
@@ -865,7 +921,7 @@ fn ::shrink_bytes<F>(initial_bytes: const u8[:], max_depth: i32, max_steps: i64,
                 steps += 1;
                 var dcand = make_driver_from_bytes(cand[..], max_depth);
                 let ok_cand = F(&dcand);
-                if !ok_cand {
+                if !ok_cand && !dcand.assumed_false {
                     current = copy(cand);
                 } else {
                     offset += step_size;
@@ -887,7 +943,7 @@ fn ::shrink_bytes<F>(initial_bytes: const u8[:], max_depth: i32, max_steps: i64,
                     steps += 1;
                     var d_sh = make_driver_from_bytes(current[..], max_depth);
                     let ok_sh = F(&d_sh);
-                    if ok_sh {
+                    if ok_sh || d_sh.assumed_false {
                         current[i + 1] = old_hi;
                         current[i] = old_lo;
                     }
@@ -905,7 +961,7 @@ fn ::shrink_bytes<F>(initial_bytes: const u8[:], max_depth: i32, max_steps: i64,
                 steps += 1;
                 var d_b0 = make_driver_from_bytes(current[..], max_depth);
                 let ok_b0 = F(&d_b0);
-                if !ok_b0 {
+                if !ok_b0 && !d_b0.assumed_false {
                     // keep 0
                 } else {
                     var b_low: i32 = 0;
@@ -916,7 +972,7 @@ fn ::shrink_bytes<F>(initial_bytes: const u8[:], max_depth: i32, max_steps: i64,
                         steps += 1;
                         var d_bmid = make_driver_from_bytes(current[..], max_depth);
                         let ok_bmid = F(&d_bmid);
-                        if !ok_bmid {
+                        if !ok_bmid && !d_bmid.assumed_false {
                             b_high = mid;
                         } else {
                             b_low = mid;
@@ -936,7 +992,7 @@ fn ::shrink_bytes<F>(initial_bytes: const u8[:], max_depth: i32, max_steps: i64,
                 steps += 1;
                 var d_f0 = make_driver_from_bytes(current[..], max_depth);
                 let ok_f0 = F(&d_f0);
-                if !ok_f0 {
+                if !ok_f0 && !d_f0.assumed_false {
                     // keep 0
                 } else {
                     var b_low: i32 = 0;
@@ -947,7 +1003,7 @@ fn ::shrink_bytes<F>(initial_bytes: const u8[:], max_depth: i32, max_steps: i64,
                         steps += 1;
                         var d_fmid = make_driver_from_bytes(current[..], max_depth);
                         let ok_fmid = F(&d_fmid);
-                        if !ok_fmid {
+                        if !ok_fmid && !d_fmid.assumed_false {
                             b_high = mid;
                         } else {
                             b_low = mid;
@@ -970,7 +1026,7 @@ fn ::shrink_bytes<F>(initial_bytes: const u8[:], max_depth: i32, max_steps: i64,
                     steps += 1;
                     var d_bit = make_driver_from_bytes(current[..], max_depth);
                     let ok_bit = F(&d_bit);
-                    if ok_bit {
+                    if ok_bit || d_bit.assumed_false {
                         current[i] = old_val;
                     }
                 }
@@ -1079,6 +1135,7 @@ struct TestResult {
     failed_seed:        u64,
     base_seed:          u64,
     total_iterations:   i64,
+    discarded_iterations: i64,
     elapsed_ns:         i64,
     shrunk:             bool,
     shrink_steps:       i64,
@@ -1271,6 +1328,7 @@ fn ::_replay_run<F>(c: Config) -> TestResult {
                 failed_seed:        0,
                 base_seed:          0,
                 total_iterations:   0,
+                discarded_iterations: 0,
                 elapsed_ns:         0,
                 shrunk:             false,
                 shrink_steps:       0,
@@ -1285,9 +1343,10 @@ fn ::_replay_run<F>(c: Config) -> TestResult {
     let start_ns = clock_ns();
     var d = make_driver_from_bytes(replay_buf[..], max_depth);
     let passed = F(&d);
+    let discarded = d.assumed_false;
     let elapsed_ns = clock_ns() - start_ns;
 
-    if !passed {
+    if !passed && !discarded {
         var did_shrink = false;
         var s_steps: i64 = 0;
         let orig_bytes_len = replay_buf.len;
@@ -1315,6 +1374,7 @@ fn ::_replay_run<F>(c: Config) -> TestResult {
             failed_seed:        0,
             base_seed:          0,
             total_iterations:   1,
+            discarded_iterations: 0,
             elapsed_ns:         elapsed_ns,
             shrunk:             did_shrink,
             shrink_steps:       s_steps,
@@ -1326,14 +1386,19 @@ fn ::_replay_run<F>(c: Config) -> TestResult {
     } else {
         if c.opt_verbose {
             let elapsed_sec = elapsed_ns / 1000000000.0;
-            print("proptest [replay]: 1 passed in ", elapsed_sec, "s");
+            if discarded {
+                print("proptest [replay]: input filtered by assume() (vacuously passed)");
+            } else {
+                print("proptest [replay]: 1 passed in ", elapsed_sec, "s");
+            }
         }
         TestResult {
             passed:             true,
             failed_iteration:   -1,
             failed_seed:        0,
             base_seed:          0,
-            total_iterations:   1,
+            total_iterations:   if discarded { 0 } else { 1 },
+            discarded_iterations: if discarded { 1 } else { 0 },
             elapsed_ns:         elapsed_ns,
             shrunk:             false,
             shrink_steps:       0,
@@ -1472,6 +1537,7 @@ fn ::_fuzz_run<F>(c: Config) -> TestResult {
     var last_progress_ns = start_ns;
     let max_time_ns = t_limit_ms * 1000000;
     var completed: i64 = 0;
+    var discarded_count: i64 = 0;
     var failed = false;
     var fail_iter: i64 = -1;
     var crashing_input: u8[>..] = [];
@@ -1501,6 +1567,12 @@ fn ::_fuzz_run<F>(c: Config) -> TestResult {
 
         var d = make_driver_from_bytes(cand[..], max_depth);
         let ok = F(&d);
+
+        if d.assumed_false {
+            discarded_count += 1;
+            i += 1;
+            continue;
+        }
 
         if !ok {
             failed = true;
@@ -1539,7 +1611,7 @@ fn ::_fuzz_run<F>(c: Config) -> TestResult {
         if failed {
             print("proptest [fuzz]: FAILED at iteration ", fail_iter, " in ", elapsed_sec, "s (", rate as! i64, " iters/sec)");
         } else {
-            print("proptest [fuzz]: ", completed, " passed in ", elapsed_sec, "s (", rate as! i64, " iters/sec)");
+            print("proptest [fuzz]: ", completed, " passed (", discarded_count, " discarded) in ", elapsed_sec, "s (", rate as! i64, " iters/sec)");
         }
     }
 
@@ -1571,6 +1643,7 @@ fn ::_fuzz_run<F>(c: Config) -> TestResult {
             failed_seed:        base_seed,
             base_seed:          base_seed,
             total_iterations:   completed,
+            discarded_iterations: discarded_count,
             elapsed_ns:         elapsed_ns,
             shrunk:             did_shrink,
             shrink_steps:       s_steps,
@@ -1586,6 +1659,7 @@ fn ::_fuzz_run<F>(c: Config) -> TestResult {
             failed_seed:        0,
             base_seed:          base_seed,
             total_iterations:   completed,
+            discarded_iterations: discarded_count,
             elapsed_ns:         elapsed_ns,
             shrunk:             false,
             shrink_steps:       0,
@@ -1609,29 +1683,50 @@ fn ::run<F>(c: Config) -> TestResult {
     let n_iterations = iterations_or_default(c);
     let base_seed = seed_or_default(c);
     let max_depth = max_depth_or_default(c);
+    let max_discards = max_discards_or_default(c);
 
     let start_ns = clock_ns();
     var failed = false;
     var fail_iter: i64 = -1;
     var fail_seed: u64 = 0;
     var completed: i64 = 0;
+    var discarded_count: i64 = 0;
+    var attempt: i64 = 0;
 
-    var i: i64 = 0;
-    while i < n_iterations {
-        let iter_seed = if n_iterations == 1 { base_seed } else { iteration_seed(base_seed, i) };
+    while completed < n_iterations {
+        let iter_seed = if n_iterations == 1 && attempt == 0 {
+            base_seed
+        } else {
+            iteration_seed(base_seed, attempt)
+        };
+        attempt += 1;
+
         var d = make_driver(iter_seed, max_depth);
         let ok = F(&d);
 
+        if d.assumed_false {
+            discarded_count += 1;
+            if discarded_count >= max_discards {
+                if c.opt_verbose {
+                    print("proptest [warning]: gave up after ", discarded_count, " discarded inputs (unable to meet assumptions via d.assume)");
+                }
+                failed = true;
+                fail_iter = completed;
+                fail_seed = iter_seed;
+                break;
+            }
+            continue;
+        }
+
         if !ok {
             failed = true;
-            fail_iter = i;
+            fail_iter = completed;
             fail_seed = iter_seed;
-            completed = i + 1;
+            completed += 1;
             break;
         }
 
-        i += 1;
-        completed = i;
+        completed += 1;
     }
 
     let elapsed_ns = clock_ns() - start_ns;
@@ -1642,7 +1737,7 @@ fn ::run<F>(c: Config) -> TestResult {
         if failed {
             print("proptest: FAILED at iteration ", fail_iter, " in ", elapsed_sec, "s (", rate as! i64, " iters/sec)");
         } else {
-            print("proptest: ", completed, " passed in ", elapsed_sec, "s (", rate as! i64, " iters/sec)");
+            print("proptest: ", completed, " passed (", discarded_count, " discarded) in ", elapsed_sec, "s (", rate as! i64, " iters/sec)");
         }
     }
 
@@ -1653,23 +1748,25 @@ fn ::run<F>(c: Config) -> TestResult {
         var s_bytes_len: i64 = 0;
         var final_bytes: u8[>..] = [];
 
-        if c.opt_shrink {
+        if c.opt_shrink && fail_iter >= 0 {
             var recording_d = make_recording_driver(fail_seed, max_depth);
             let _ = F(&recording_d);
-            let recorded_bytes = copy(recording_d.recorded);
-            orig_bytes_len = recorded_bytes.len;
+            if !recording_d.assumed_false {
+                let recorded_bytes = copy(recording_d.recorded);
+                orig_bytes_len = recorded_bytes.len;
 
-            if orig_bytes_len > 0 {
-                let max_steps = shrink_steps_or_default(c);
-                let max_time_ms = shrink_time_ms_or_default(c);
-                let sr = shrink_bytes(recorded_bytes[..], max_depth, max_steps, max_time_ms, F);
-                s_steps = sr.steps;
-                did_shrink = sr.shrunk;
-                final_bytes = copy(sr.shrunk_bytes);
-                s_bytes_len = final_bytes.len;
+                if orig_bytes_len > 0 {
+                    let max_steps = shrink_steps_or_default(c);
+                    let max_time_ms = shrink_time_ms_or_default(c);
+                    let sr = shrink_bytes(recorded_bytes[..], max_depth, max_steps, max_time_ms, F);
+                    s_steps = sr.steps;
+                    did_shrink = sr.shrunk;
+                    final_bytes = copy(sr.shrunk_bytes);
+                    s_bytes_len = final_bytes.len;
 
-                var minimal_d = make_driver_from_bytes(final_bytes[..], max_depth);
-                let _ = F(&minimal_d);
+                    var minimal_d = make_driver_from_bytes(final_bytes[..], max_depth);
+                    let _ = F(&minimal_d);
+                }
             }
         }
 
@@ -1680,7 +1777,8 @@ fn ::run<F>(c: Config) -> TestResult {
             failed_iteration:   fail_iter,
             failed_seed:        fail_seed,
             base_seed:          base_seed,
-            total_iterations:   n_iterations,
+            total_iterations:   completed,
+            discarded_iterations: discarded_count,
             elapsed_ns:         elapsed_ns,
             shrunk:             did_shrink,
             shrink_steps:       s_steps,
@@ -1696,6 +1794,7 @@ fn ::run<F>(c: Config) -> TestResult {
             failed_seed:        0,
             base_seed:          base_seed,
             total_iterations:   completed,
+            discarded_iterations: discarded_count,
             elapsed_ns:         elapsed_ns,
             shrunk:             false,
             shrink_steps:       0,
@@ -1727,6 +1826,9 @@ fn ::for_each<F>(c: Config) {
         } else {
             print("Property failed at iteration: ", res.failed_iteration, " / ", res.total_iterations);
             print("Iteration seed: ", res.failed_seed, " (base seed: ", res.base_seed, ")");
+        }
+        if res.discarded_iterations > 0 {
+            print("Discarded iterations: ", res.discarded_iterations);
         }
         if res.shrunk || res.original_bytes_len > 0 {
             print("Shrinking: ", res.original_bytes_len, " bytes -> ", res.shrunk_bytes_len, " bytes (", res.shrink_steps, " steps)");
@@ -1810,6 +1912,9 @@ fn ::for_each_contained<W>(c: Config) {
         } else {
             print("Property failed at iteration: ", res.failed_iteration, " / ", res.total_iterations);
             print("Iteration seed: ", res.failed_seed, " (base seed: ", res.base_seed, ")");
+        }
+        if res.discarded_iterations > 0 {
+            print("Discarded iterations: ", res.discarded_iterations);
         }
         if res.shrunk || res.original_bytes_len > 0 {
             print("Shrinking: ", res.original_bytes_len, " bytes -> ", res.shrunk_bytes_len, " bytes (", res.shrink_steps, " steps)");

@@ -2306,6 +2306,7 @@ fn fuzz(c: Config, v: bool = true) -> Config
 fn replay(c: Config, path: const u8[:]) -> Config
 fn replay_bytes(c: Config, raw: const u8[:]) -> Config
 fn crash_file(c: Config, path: const u8[:]) -> Config
+fn max_discards(c: Config, n: i64) -> Config
 ```
 
 `check()` starts a configuration chain with sensible defaults: 1,000 iterations,
@@ -2364,10 +2365,40 @@ fn gen_array<F>(d: Driver&, min_len: i64, max_len: i64)
 fn choose<T>(d: Driver&, items: const T[:]) -> T
 fn one_of<T>(d: Driver&, items: const T[:]) -> T
 fn frequency(d: Driver&, weights: const i64[:]) -> i64
+
+// Assumption filtering
+fn assume(d: Driver&, cond: bool) -> bool
+fn filter(d: Driver&, cond: bool) -> bool
+fn is_discarded(d: Driver&) -> bool
 ```
 
 UFCS applies directly to `Driver`: `d.next_u32()`, `d.int_range(0, 100)`,
-`d.ascii(1, 32)`, `d.utf8(0, 64)`.
+`d.ascii(1, 32)`, `d.utf8(0, 64)`, `d.assume(cond)`.
+
+### Assumption filtering: `d.assume(cond)`
+
+When generated inputs are invalid or uninteresting for a specific property (e.g. division by zero,
+degenerate geometries, or invalid domain invariants), `d.assume(cond)` discards the input without
+treating it as a failure or distorting test coverage metrics. The test runner transparently retries
+with a fresh seed up to the configured discard limit (`max_discards`):
+
+```goose
+import proptest;
+
+fn test_division() {
+    check().iterations(500).for_each() { d =>
+        let num = d.int_range(-1000, 1000);
+        let den = d.int_range(-1000, 1000);
+        d.assume(den != 0); // discard den == 0 without failing
+        (num / den) * den + (num % den) == num
+    };
+}
+```
+
+Can also be used with guard syntax or early return:
+```goose
+guard d.assume(len > 0) else { return true; }
+```
 
 ```goose
 import proptest;

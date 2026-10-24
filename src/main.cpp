@@ -1722,7 +1722,12 @@ int Main(int argc, char **argv) {
             }
 
             if (returns_bool) {
-                worker_body += cat("    if !", call, " {\n        abort(\"fuzz target returned false\");\n    }\n");
+                if (pkind == PK_DRIVER) {
+                    worker_body += cat("    let _res = ", call, ";\n");
+                    worker_body += "    if !_res && !d.assumed_false {\n        abort(\"fuzz target returned false\");\n    }\n";
+                } else {
+                    worker_body += cat("    if !", call, " {\n        abort(\"fuzz target returned false\");\n    }\n");
+                }
             } else {
                 worker_body += cat("    ", call, ";\n");
             }
