@@ -1750,6 +1750,11 @@ int Main(int argc, char **argv) {
         if (!fuzz_corpus_dir.empty()) {
             Append(main_body, "    c = crash_file(c, \"", fuzz_corpus_dir, "/crash.bin\");\n");
         }
+        // Record the source file and target name so the failure banner can
+        // print a copy-pasteable `goose fuzz` replay command instead of the
+        // opaque run_contained(...) snippet.
+        Append(main_body, "    c = fuzz_source_file(c, \"", targetfile, "\");\n");
+        Append(main_body, "    c = fuzz_target_name(c, \"", string(chosen->name), "\");\n");
         main_body += "    for_each_contained(c, _fuzz_worker);\n";
 
         auto target_stem = PathStem(targetfile);

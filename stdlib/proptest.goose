@@ -43,6 +43,8 @@ struct Config {
     opt_has_replay:     bool = false,
     opt_replay_file:    const u8[:] = "",
     opt_replay_bytes:   const u8[:] = "",
+    opt_fuzz_source_file: const u8[:] = "", // set by CLI harness: the .goose source file
+    opt_fuzz_target_name: const u8[:] = "", // set by CLI harness: the fuzz target function name
 }
 
 type ::Config = proptest::Config;
@@ -83,6 +85,12 @@ fn ::replay_bytes(var c: Config, raw: const u8[:]) -> Config {
     c.opt_has_replay = true;
     c
 }
+fn ::fuzz_source_file(var c: Config, path: const u8[:]) -> Config {
+    c.opt_fuzz_source_file = path; c
+}
+fn ::fuzz_target_name(var c: Config, name: const u8[:]) -> Config {
+    c.opt_fuzz_target_name = name; c
+}
 
 // Namespaced mirrors
 fn iterations(var c: Config, n: i64) -> Config        { ::iterations(c, n) }
@@ -104,6 +112,8 @@ fn save_crashes(var c: Config, v: bool) -> Config     { ::save_crashes(c, v) }
 fn crash_file(var c: Config, path: const u8[:]) -> Config { ::crash_file(c, path) }
 fn replay(var c: Config, path: const u8[:]) -> Config { ::replay(c, path) }
 fn replay_bytes(var c: Config, raw: const u8[:]) -> Config { ::replay_bytes(c, raw) }
+fn fuzz_source_file(var c: Config, path: const u8[:]) -> Config { ::fuzz_source_file(c, path) }
+fn fuzz_target_name(var c: Config, name: const u8[:]) -> Config { ::fuzz_target_name(c, name) }
 
 // Queries on Config.
 fn ::is_replay(c: Config) -> bool                     { c.opt_has_replay }
@@ -1772,11 +1782,25 @@ fn ::for_each_contained<W>(c: Config) {
             print("Saved minimal crash artifact to: ", res.saved_crash_file);
         }
         print("Reproduction:");
-        if res.saved_crash_file.len > 0 {
-            print("  proptest::check().replay(\"", res.saved_crash_file, "\").run_contained(...)");
-        }
-        if res.failed_seed != 0 {
-            print("  proptest::check().seed(", res.failed_seed, ").iterations(1).run_contained(...)");
+        let is_cli_fuzz = c.opt_fuzz_source_file.len > 0 && c.opt_fuzz_target_name.len > 0;
+        if is_cli_fuzz {
+            // CLI fuzz target: users never see run_contained; give them the goose fuzz command.
+            if res.saved_crash_file.len > 0 {
+                print("  goose fuzz ", c.opt_fuzz_source_file,
+                      " --target ", c.opt_fuzz_target_name,
+                      " --replay ", res.saved_crash_file);
+            }
+            if res.shrunk_bytes_len > 0 {
+                print("  (or paste the hex above into --replay)");
+            }
+        } else {
+            // In-code proptest: run_contained is user-visible.
+            if res.saved_crash_file.len > 0 {
+                print("  proptest::check().replay(\"", res.saved_crash_file, "\").run_contained(...)");
+            }
+            if res.failed_seed != 0 {
+                print("  proptest::check().seed(", res.failed_seed, ").iterations(1).for_each() { d => ... }");
+            }
         }
         print("==============================================================");
         abort("proptest: contained property check failed");
