@@ -703,7 +703,7 @@ fn build(pattern: u8[:], err: u8[>..]&, aborts: bool) -> Regex {
         }
     }
 
-    let re = Regex {
+    var re = Regex {
         groups: groups,
         nullable: prefix.len == 0,
         placed: placed,
@@ -721,6 +721,9 @@ fn build(pattern: u8[:], err: u8[>..]&, aborts: bool) -> Regex {
         prog: copy(prog),
         sets: copy(sets),
     };
+    if has_assert {
+        re.nullable = matches(re, "");
+    }
     if !has_assert && too_big { stop(str("regex: the pattern's DFA would be too large: ", pattern)); }
     return re;
 }
@@ -764,6 +767,7 @@ fn prefix_sets(prog: Inst[:], sets: (bool[256])[:], entry: i32) -> (bool[256])[>
         front.clear();
         front.append(next);
         next.clear();
+        guard front.len > 0 else { break; }
         round++;
         var s: bool[256] = [false; 256];
         var matched = false;
