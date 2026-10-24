@@ -167,6 +167,7 @@ fn rand_u64(r: rng&) -> u64
 fn rand_int(r: rng&, n: i64) -> i64      // uniform in [0, n)
 fn rand_flt(r: rng&) -> f64              // uniform in [0, 1)
 fn shuffle<T>(xs: T[:], r: rng&)         // Fisher-Yates
+fn choose<T>(xs: T[:], r: rng&) -> T     // pick a random element from a non-empty slice
 ```
 
 ```goose

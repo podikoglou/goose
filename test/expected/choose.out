@@ -1,0 +1,12 @@
+ints: 40 20 40
+single int: 999
+ufcs int: 10
+all int elements hit: true
+string chars: true true true
+contains: true true
+words: apple cherry
+single word: goose
+points: (2,20) (2,20)
+node: 101 first
+bool: false
+flt: 2.5

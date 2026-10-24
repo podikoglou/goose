@@ -213,6 +213,13 @@ fn shuffle<T>(xs: T[:], r: rng&) {
     }
 }
 
+// Pick a random element from a non-empty slice.
+fn choose<T>(xs: T[:], r: rng&) -> T {
+    assert(xs.len > 0);
+    let idx = rand_int(r, xs.len);
+    return xs[idx];
+}
+
 // ---- arrays: reading and searching -------------------------------------------
 
 fn swap_at<T>(xs: T[:], i: i64, j: i64) {
