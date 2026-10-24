@@ -2299,8 +2299,8 @@ inline void TypeCheck::CheckVarDecl(VarDecl *vd, bool global) {
         return;
     }
     if (vd->inits.size() != vd->names.size())
-        Error(vd, cat((int64_t)vd->names.size(), " name(s) with ",
-                      (int64_t)vd->inits.size(), " initializer(s)"));
+        Error(vd, cat((int64_t)vd->names.size(), vd->results ? " targets with " : " name(s) with ",
+                      (int64_t)vd->inits.size(), vd->results ? " values" : " initializer(s)"));
     for (size_t i = 0; i < vd->names.size(); i++) {
         auto d = MakeDef(i);
         Val v;

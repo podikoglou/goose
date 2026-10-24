@@ -168,7 +168,7 @@ inline void TypeExpr::Dump(string &s, size_t limit) const {
 // each.
 inline const VarDecl *MultiAssignOf(const Block *b) {
     auto vd = b->stmts.empty() ? nullptr : Is<VarDecl>(b->stmts[0]);
-    if (!vd || !vd->results || b->tail || vd->inits.size() != 1 ||
+    if (!vd || !vd->results || b->tail || vd->inits.empty() ||
         b->stmts.size() != vd->names.size() + 1)
         return nullptr;
     for (size_t i = 1; i < b->stmts.size(); i++) {
@@ -241,7 +241,10 @@ inline void Block::Dump(string &s, int ind) const {
             Is<Assign>(stmts[i])->lval->Dump(s, ind);
         }
         s += " = ";
-        vd->inits[0]->Dump(s, ind);
+        for (size_t i = 0; i < vd->inits.size(); i++) {
+            if (i > 0) s += ", ";
+            vd->inits[i]->Dump(s, ind);
+        }
         return;
     }
     s += "{";

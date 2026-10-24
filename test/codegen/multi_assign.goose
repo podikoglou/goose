@@ -65,4 +65,29 @@ fn main() {
         total += m;
     }
     print(acc, " ", total);                 // abc 60
+
+    // Multi-variable comma assignment (a, b = b, a).
+    var x = 10;
+    var y = 20;
+    x, y = y, x;
+    print(x, " ", y);                       // 20 10
+
+    var c1 = 1;
+    var c2 = 2;
+    var c3 = 3;
+    c1, c2, c3 = c2 + c3, c1 + c3, c1 + c2;
+    print(c1, " ", c2, " ", c3);            // 5 4 3
+
+    // Array elements swap.
+    var arr = [100, 200, 300];
+    arr[0], arr[2] = arr[2], arr[0];
+    print(arr);                             // [300, 200, 100]
+
+    // Fibonacci with simultaneous comma assignment.
+    var f0 = 0;
+    var f1 = 1;
+    for _ in 7 {
+        f0, f1 = f1, f0 + f1;
+    }
+    print(f0, " ", f1);                     // 13 21
 }

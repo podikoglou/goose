@@ -1971,14 +1971,17 @@ struct Parser {
                   " so a block or branch cannot end in `a, b`: return from each branch"
                   " instead (§7.1)");
         lex.Next();
-        auto rhs = ParseExpr();
+        vector<Node *> inits = { ParseExpr() };
+        while (IsNext(T_COMMA)) inits.push_back(ParseExpr());
         Expect(T_SEMI, "assignment statement");
+        if (inits.size() > 1 && inits.size() != targets.size())
+            Error(cat((int64_t)targets.size(), " targets with ", (int64_t)inits.size(), " values"));
         auto b = Finish(New<Block>(line));
         auto vd = Finish(New<VarDecl>(line, false));
         vd->results = true;
         for (size_t i = 0; i < targets.size(); i++)
             vd->names.push_back(ast.Intern(cat("result#", i + 1)));
-        vd->inits.push_back(rhs);
+        vd->inits = std::move(inits);
         b->stmts.push_back(vd);
         for (size_t i = 0; i < targets.size(); i++)
             b->stmts.push_back(Finish(New<Assign>(line, T_ASSIGN, targets[i],
