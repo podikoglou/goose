@@ -196,11 +196,13 @@ fn binary_search<T>(xs: T[:], v: T) -> i64, bool   // sorted by <: position (or 
 fn find<T>(xs: T[:], sub: T[:]) -> i64         // first occurrence of a subsequence, -1 if none
 fn rfind<T>(xs: T[:], sub: T[:]) -> i64
 fn starts_with<T>(xs: T[:], p: T[:]) -> bool   fn ends_with<T>(xs: T[:], p: T[:]) -> bool
+fn starts_with<T>(xs: T[:], val: T) -> bool    fn ends_with<T>(xs: T[:], val: T) -> bool
 ```
 
 `find`/`rfind`/`starts_with`/`ends_with` are generic over the element, so
-they are the string functions too: `find(line, "://")`. `find` and `rfind`
-compare a whole subsequence only where its first element matches.
+they are the string functions too: `find(line, "://")`. `starts_with` and `ends_with`
+also accept a single element `val: T` (for example, a single byte/character `'/'` on strings).
+`find` and `rfind` compare a whole subsequence only where its first element matches.
 (`position` rather than `index_of`, which is the builtin turning an element
 reference into its index.)
 

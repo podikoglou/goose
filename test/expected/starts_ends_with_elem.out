@@ -1,0 +1,36 @@
+--- strings ---
+true false
+true false
+true true
+false false
+false false
+true true
+false false
+true false
+true false
+true true
+true true
+true true
+--- ints ---
+true false
+true false
+true true
+false false
+true true
+false false
+true true
+false false
+--- floats ---
+true false
+true false
+true true
+false false
+true false
+--- structs ---
+true false
+true false
+true true
+false false
+true true
+false false
+true false

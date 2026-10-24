@@ -381,7 +381,9 @@ fn rfind<T>(xs: T[:], sub: T[:]) -> i64 {
 }
 
 fn starts_with<T>(xs: T[:], p: T[:]) -> bool { p.len <= xs.len && xs[..p.len] == p }
+fn starts_with<T>(xs: T[:], val: T) -> bool { xs.len > 0 && xs[0] == val }
 fn ends_with<T>(xs: T[:], p: T[:]) -> bool { p.len <= xs.len && xs[xs.len - p.len..] == p }
+fn ends_with<T>(xs: T[:], val: T) -> bool { xs.len > 0 && xs[xs.len - 1] == val }
 
 // ---- byte sets ------------------------------------------------------------------
 
