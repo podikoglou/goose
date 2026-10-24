@@ -2317,9 +2317,9 @@ import proptest;
 
 fn test_addition_commutative() {
     check().iterations(5000).for_each() { d =>
-        let a = d.next_i64();
-        let b = d.next_i64();
-        assert(a + b == b + a);
+        let a = d.int_range(-1000000, 1000000);
+        let b = d.int_range(-1000000, 1000000);
+        a + b == b + a
     };
 }
 ```
@@ -2331,27 +2331,38 @@ either generated on the fly by an internal PRNG, or mapped from an input byte bu
 during mutation fuzzing, shrinking, and replay.
 
 ```goose
-// Primitive generators
+// Primitive generators (uniform entropy from PRNG or mutation stream)
 fn next_bool(d: Driver&) -> bool
 fn next_u8(d: Driver&) -> u8
 fn next_u16(d: Driver&) -> u16
 fn next_u32(d: Driver&) -> u32
 fn next_u64(d: Driver&) -> u64
+fn next_i8(d: Driver&) -> i8
+fn next_i16(d: Driver&) -> i16
+fn next_i32(d: Driver&) -> i32
 fn next_i64(d: Driver&) -> i64
 fn next_f32(d: Driver&) -> f32
 fn next_f64(d: Driver&) -> f64
 
-// Range generators
+// Range and structured generators (with boundary edge-case biasing)
+fn gen_i64(d: Driver&) -> i64
+fn gen_i64(d: Driver&, min: i64, max: i64) -> i64
 fn gen_i64_range(d: Driver&, min: i64, max: i64) -> i64
+fn int_range(d: Driver&, min: i64, max: i64) -> i64
+fn gen_f64(d: Driver&) -> f64
 fn gen_f64_range(d: Driver&, min: f64, max: f64) -> f64
+fn gen_bool(d: Driver&) -> bool
 
 // Slices, collections and strings
+fn gen_bytes(d: Driver&, min_len: i64, max_len: i64) -> u8[>..]
 fn gen_u8_array(d: Driver&, min_len: i64, max_len: i64) -> u8[>..]
 fn gen_ascii_string(d: Driver&, min_len: i64, max_len: i64) -> u8[>..]
 fn gen_utf8_string(d: Driver&, min_len: i64, max_len: i64) -> u8[>..]
+fn gen_array<F>(d: Driver&, min_len: i64, max_len: i64)
 
 // Combinators
 fn choose<T>(d: Driver&, items: const T[:]) -> T
+fn one_of<T>(d: Driver&, items: const T[:]) -> T
 fn frequency(d: Driver&, weights: const i64[:]) -> i64
 ```
 
@@ -2359,12 +2370,16 @@ UFCS applies directly to `Driver`: `d.next_u32()`, `d.int_range(0, 100)`,
 `d.ascii(1, 32)`, `d.utf8(0, 64)`.
 
 ```goose
-check().for_each() { d =>
-    let name = d.ascii(1, 16);
-    let score = d.int_range(0, 1000);
-    let active = d.next_bool();
-    // Test invariants on the generated struct...
-};
+import proptest;
+
+fn test_player() {
+    check().for_each() { d =>
+        let name = d.ascii(1, 16);
+        let score = d.int_range(0, 1000);
+        let active = d.next_bool();
+        name.len >= 1 && score >= 0
+    };
+}
 ```
 
 ### Execution and shrinking

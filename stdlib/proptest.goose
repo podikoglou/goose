@@ -286,6 +286,36 @@ fn ::next_u64(d: Driver&) -> u64 {
            (b4 << 32) | (b5 << 40) | (b6 << 48) | (b7 << 56);
 }
 
+fn ::next_bool(d: Driver&) -> bool {
+    (next_u8(d) & 1) == 1
+}
+
+fn ::next_i8(d: Driver&) -> i8 {
+    next_u8(d) as! i8
+}
+
+fn ::next_i16(d: Driver&) -> i16 {
+    next_u16(d) as! i16
+}
+
+fn ::next_i32(d: Driver&) -> i32 {
+    next_u32(d) as! i32
+}
+
+fn ::next_i64(d: Driver&) -> i64 {
+    next_u64(d) as! i64
+}
+
+fn next_bool(d: Driver&) -> bool { ::next_bool(d) }
+fn next_u8(d: Driver&) -> u8     { ::next_u8(d) }
+fn next_u16(d: Driver&) -> u16   { ::next_u16(d) }
+fn next_u32(d: Driver&) -> u32   { ::next_u32(d) }
+fn next_u64(d: Driver&) -> u64   { ::next_u64(d) }
+fn next_i8(d: Driver&) -> i8     { ::next_i8(d) }
+fn next_i16(d: Driver&) -> i16   { ::next_i16(d) }
+fn next_i32(d: Driver&) -> i32   { ::next_i32(d) }
+fn next_i64(d: Driver&) -> i64   { ::next_i64(d) }
+
 fn ::enter_depth(d: Driver&) -> bool {
     if d.depth >= d.max_depth { return false; }
     d.depth += 1;
@@ -510,9 +540,22 @@ fn ::gen_f32(d: Driver&, min: f32, max: f32) -> f32 {
     gen_f32_range(d, min, max)
 }
 
+fn ::next_f32(d: Driver&) -> f32 {
+    gen_f32(d)
+}
+
+fn ::next_f64(d: Driver&) -> f64 {
+    gen_f64(d)
+}
+
+fn next_f32(d: Driver&) -> f32 { ::next_f32(d) }
+fn next_f64(d: Driver&) -> f64 { ::next_f64(d) }
+
 fn ::gen_bool(d: Driver&) -> bool {
     (next_u8(d) & 1) == 1
 }
+
+fn gen_bool(d: Driver&) -> bool { ::gen_bool(d) }
 
 fn ::gen_bool_prob(d: Driver&, p: f64) -> bool {
     if p <= 0.0 { return false; }
@@ -528,6 +571,18 @@ fn ::gen_bytes(d: Driver&, min_len: i64, max_len: i64) -> u8[>..] {
         res.push(next_u8(d));
     }
     res
+}
+
+fn ::gen_u8_array(d: Driver&, min_len: i64, max_len: i64) -> u8[>..] {
+    gen_bytes(d, min_len, max_len)
+}
+
+fn gen_bytes(d: Driver&, min_len: i64, max_len: i64) -> u8[>..] {
+    ::gen_bytes(d, min_len, max_len)
+}
+
+fn gen_u8_array(d: Driver&, min_len: i64, max_len: i64) -> u8[>..] {
+    ::gen_u8_array(d, min_len, max_len)
 }
 
 fn ::gen_ascii_string(d: Driver&, min_len: i64, max_len: i64) -> u8[>..] {
@@ -613,6 +668,77 @@ fn ::gen_one_of<T>(d: Driver&, choices: T[:]) -> T {
     choices[idx]
 }
 
+fn ::choose<T>(d: Driver&, choices: T[:]) -> T {
+    gen_one_of(d, choices)
+}
+
+fn ::gen_choose<T>(d: Driver&, choices: T[:]) -> T {
+    gen_one_of(d, choices)
+}
+
+fn choose<T>(d: Driver&, choices: T[:]) -> T {
+    ::choose(d, choices)
+}
+
+fn gen_choose<T>(d: Driver&, choices: T[:]) -> T {
+    ::gen_choose(d, choices)
+}
+
+fn one_of<T>(d: Driver&, choices: T[:]) -> T {
+    ::one_of(d, choices)
+}
+
+fn ::int_range(d: Driver&, min: i64, max: i64) -> i64 {
+    gen_i64_range(d, min, max)
+}
+
+fn ::gen_int_range(d: Driver&, min: i64, max: i64) -> i64 {
+    gen_i64_range(d, min, max)
+}
+
+fn int_range(d: Driver&, min: i64, max: i64) -> i64 {
+    ::int_range(d, min, max)
+}
+
+fn gen_int_range(d: Driver&, min: i64, max: i64) -> i64 {
+    ::gen_int_range(d, min, max)
+}
+
+fn ::gen_frequency(d: Driver&, weights: const i64[:]) -> i64 {
+    if weights.len == 0 {
+        abort("proptest: frequency called with empty weights array");
+    }
+    var total: i64 = 0;
+    for w in weights {
+        if w > 0 { total += w; }
+    }
+    if total <= 0 {
+        abort("proptest: frequency called with non-positive total weight");
+    }
+    let pick = gen_i64_range(d, 0, total - 1);
+    var acc: i64 = 0;
+    for i in weights.len {
+        let w = weights[i];
+        if w > 0 {
+            acc += w;
+            if pick < acc { return i; }
+        }
+    }
+    return weights.len - 1;
+}
+
+fn ::frequency(d: Driver&, weights: const i64[:]) -> i64 {
+    gen_frequency(d, weights)
+}
+
+fn frequency(d: Driver&, weights: const i64[:]) -> i64 {
+    ::frequency(d, weights)
+}
+
+fn gen_frequency(d: Driver&, weights: const i64[:]) -> i64 {
+    ::gen_frequency(d, weights)
+}
+
 // Clean alias methods for idiomatic UFCS:
 fn ::bytes(d: Driver&, min_len: i64, max_len: i64) -> u8[>..]  { gen_bytes(d, min_len, max_len) }
 fn ::ascii(d: Driver&, min_len: i64, max_len: i64) -> u8[>..]  { gen_ascii_string(d, min_len, max_len) }
@@ -620,6 +746,11 @@ fn ::utf8(d: Driver&, min_len: i64, max_len: i64) -> u8[>..]   { gen_utf8_string
 fn ::array<F>(d: Driver&, min_len: i64, max_len: i64)          { gen_array(d, min_len, max_len, F) }
 fn ::variant(d: Driver&, num_variants: i64) -> i64             { gen_variant(d, num_variants) }
 fn ::one_of<T>(d: Driver&, choices: T[:]) -> T                 { gen_one_of(d, choices) }
+
+fn bytes(d: Driver&, min_len: i64, max_len: i64) -> u8[>..]    { ::bytes(d, min_len, max_len) }
+fn ascii(d: Driver&, min_len: i64, max_len: i64) -> u8[>..]    { ::ascii(d, min_len, max_len) }
+fn utf8(d: Driver&, min_len: i64, max_len: i64) -> u8[>..]     { ::utf8(d, min_len, max_len) }
+fn variant(d: Driver&, num_variants: i64) -> i64               { ::variant(d, num_variants) }
 
 // ---- Universal Byte Shrinker -----------------------------------------------
 

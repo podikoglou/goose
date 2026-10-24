@@ -58,6 +58,29 @@ fn test_generators() {
     let choices: i64[3] = [10, 20, 30];
     let pick = d.gen_one_of(choices);
     assert(pick == 10 || pick == 20 || pick == 30, "one_of picks valid choice");
+
+    let nb = d.next_bool();
+    assert(nb == true || nb == false, "next_bool valid");
+
+    let ni8 = d.next_i8();
+    let ni16 = d.next_i16();
+    let ni32 = d.next_i32();
+    let ni64 = d.next_i64();
+    let nf32 = d.next_f32();
+    let nf64 = d.next_f64();
+
+    let ir = d.int_range(10, 20);
+    assert(ir >= 10 && ir <= 20, "int_range in bounds");
+
+    let ch = d.choose(choices);
+    assert(ch == 10 || ch == 20 || ch == 30, "choose picks valid choice");
+
+    let u8_arr = d.gen_u8_array(4, 12);
+    assert(u8_arr.len >= 4 && u8_arr.len <= 12, "gen_u8_array in bounds");
+
+    let weights: i64[3] = [0, 100, 0];
+    let f_idx = d.frequency(weights);
+    assert(f_idx == 1, "frequency selects only non-zero weight index");
 }
 
 fn test_properties() {
@@ -106,10 +129,27 @@ fn test_shrinking() {
     assert(b_min == 200, "b shrinks to exactly 200");
 }
 
+fn test_doc_examples() {
+    // Snippet from docs/stdlib.md:
+    check().iterations(500).for_each() { d =>
+        let a = d.int_range(-1000000, 1000000);
+        let b = d.int_range(-1000000, 1000000);
+        (a + b) == (b + a)
+    };
+
+    check().iterations(500).for_each() { d =>
+        let name = d.ascii(1, 16);
+        let score = d.int_range(0, 1000);
+        let active = d.next_bool();
+        name.len >= 1 && score >= 0 && (active || !active)
+    };
+}
+
 fn main() {
     test_driver_modes();
     test_generators();
     test_properties();
     test_shrinking();
+    test_doc_examples();
     print("proptest: all properties, generators, drivers and shrinking passed");
 }
