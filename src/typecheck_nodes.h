@@ -660,6 +660,10 @@ inline Val AliasDecl::Check(TypeCheck &tc, TypeExpr *) {
     tc.Error(this, "a declaration is a statement, not a value");
 }
 
+inline Val PropDecl::Check(TypeCheck &tc, TypeExpr *) {
+    tc.Error(this, "a declaration is a statement, not a value");
+}
+
 inline Val InlineBlock::Check(TypeCheck &tc, TypeExpr *) {
     tc.Error(this, "internal: optimizer node reached the typechecker");
 }

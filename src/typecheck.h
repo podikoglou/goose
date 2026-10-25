@@ -2329,6 +2329,8 @@ struct TypeCheck {
     void ReturnThroughCalls(Val &v, int tf, Return *r);
     void CheckReturn(Return *r);
     FnSpec *EnsureThreadSpec(SFunction *sf, Line l);
+    void CheckProperties();
+    void CheckPropDecl(PropDecl *prop);
 
     // ------------------------------------------------------------------
     // Struct and variant literals (§4.2). The per-node entry is
@@ -3043,6 +3045,7 @@ struct TypeCheck {
         CheckRoot([&] { ResolveGrowConflicts(); });
         CheckRoot([&] { VerifyLiterals(); });
         CheckRoot([&] { ReportRedundantCasts(); });
+        CheckRoot([&] { CheckProperties(); });
         if (ast.exemplars) CheckExemplars();
     }
 
