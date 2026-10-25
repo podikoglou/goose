@@ -5,6 +5,12 @@ import std;
 
 // Negative offsets/sizes wrap above every valid slice length. Check the
 // offset before subtracting, so even extreme inputs cannot wrap the range.
+prop "bounds" for (data: const u8[:]), (at: i64), (size: i64) where at in 0..=1000, size in 0..=1000 {
+    range_ok(data, at, size) == (at + size <= data.len)
+}
+prop "negative offsets rejected" for (data: const u8[:]), (at: i64), (size: i64) where at in -1000..=-1, size in 0..=1000 {
+    !range_ok(data, at, size)
+}
 fn range_ok(data: const u8[:], at: i64, size: i64) -> bool {
     let start = at as! u64;
     start <= data.len as u64 && (size as! u64) <= data.len as u64 - start
@@ -15,6 +21,10 @@ fn read_bytes(data: const u8[:], at: i64, size: i64) -> const u8[:], bool {
     if !range_ok(data, at, size) { return data[..0], false; }
     return data[at..at + size], true;
 }
+prop "byte composition" for (data: const u8[:]), (at: i64) where data.len in 2..=512, at in 0..=510, at + 2 <= data.len {
+    let val, ok = read_u16le(data, at);
+    ok && val == (data[at] | ((data[at + 1] as u16) << 8))
+}
 fn read_u16le(data: const u8[:], at: i64) -> u16, bool {
     if !range_ok(data, at, 2) { return 0, false; }
     return data[at] | (data[at + 1] as u16 << 8), true;
@@ -22,6 +32,16 @@ fn read_u16le(data: const u8[:], at: i64) -> u16, bool {
 fn read_i16le(data: const u8[:], at: i64) -> i16, bool {
     let value, ok = read_u16le(data, at);
     return value as! i16, ok;
+}
+prop "byte composition" for (data: const u8[:]), (at: i64) where data.len in 4..=512, at in 0..=508, at + 4 <= data.len {
+    let val, ok = read_u32le(data, at);
+    ok && val == (data[at] | ((data[at + 1] as u32) << 8) | ((data[at + 2] as u32) << 16) | ((data[at + 3] as u32) << 24))
+}
+prop "composite consistency" for (data: const u8[:]), (at: i64) where data.len in 4..=512, at in 0..=508, at + 4 <= data.len {
+    let u32_val, ok32 = read_u32le(data, at);
+    let u16_lo, ok16_lo = read_u16le(data, at);
+    let u16_hi, ok16_hi = read_u16le(data, at + 2);
+    ok32 && ok16_lo && ok16_hi && u32_val == (u16_lo | ((u16_hi as u32) << 16))
 }
 fn read_u32le(data: const u8[:], at: i64) -> u32, bool {
     if !range_ok(data, at, 4) { return 0, false; }
