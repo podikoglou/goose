@@ -20,6 +20,8 @@
 #include "typecheck_calls.h"
 #include "typecheck_builtins.h"
 #include "typecheck_nodes.h"
+#include "typecheck_prop.h"
+#include "lower_prop.h"
 #include "optimize.h"
 #include "optimize_basecase.h"
 #include "optimize_tre.h"
@@ -721,6 +723,7 @@ Commands:
   run        Compile a program and run it in this process, which goose
              file.goose does too.
   build      Build an executable with a C compiler on this machine.
+  test       Verifies declarative property specifications ('prop') in a file.
   fuzz       Discovers and continuously fuzzes targets in a file.
   check      Parse and typecheck a program, and run nothing.
   fetch      Fetch the packages a program declares.
@@ -781,6 +784,26 @@ R"(  --cc name|path        The C compiler: msvc, clang-cl, clang, gcc, cc or a
   --standalone          Compile the runtime into the program rather than link
                         the runtime object built once per C compiler.
   -v                    Print each command the build runs and what it prints.
+  --dry-run             Print the commands the build would run, and run none.
+)");
+    if (topic == "test") return cat(
+R"(usage: goose test file.goose [options]
+
+Verifies declarative property specifications ('prop') in a file. Synthesizes
+a property testing harness with constraint-narrowed input generators.
+
+Options:
+  --target name         Filter by property target name or tag.
+  --list-targets        List discovered property test targets and exit.
+  --seed hex|dec        Deterministic PRNG seed.
+  --replay path|hex     Replay minimal counterexample directly.
+  --timeout secs        Maximum runtime in seconds.
+  --max-len n           Collection length bound override.
+  -O0, -O1, -O2         Inlining level (default -O2).
+)", DEBUGOPTION, COMPILEOPTIONS,
+R"(  --cc name|path        The C compiler: msvc, clang-cl, clang, gcc, cc or a
+                        path (or GOOSE_CC; by default the first one found).
+  -v                    Print each command that builds the test, and what it prints.
   --dry-run             Print the commands the build would run, and run none.
 )");
     if (topic == "fuzz") return cat(
@@ -899,6 +922,9 @@ Options:
   --dump                Print the parsed program back as source.
   --dump-docs           Print the documentation comments of the program's
                         declarations, fields and variants.
+  --dump-prop-harness   Print the synthesized property verification test harness.
+  --list-prop-targets   List discovered property verification targets.
+  --prop-target name    Filter property target to synthesize harness for.
   --dump-file out       Write that dump to a file, and go on.
   --roundtrip           Check that the dump parses and dumps back to itself.
   --multi-test file...  Compile each file as a run of its own would, ending what
@@ -1047,7 +1073,7 @@ int Main(int argc, char **argv) {
     if (argc > 1) {
         string v = argv[1];
         if (v == "run" || v == "build" || v == "check" || v == "fetch" || v == "toolchain" ||
-            v == "version" || v == "help" || v == "lsp" || v == "fuzz") {
+            v == "version" || v == "help" || v == "lsp" || v == "fuzz" || v == "test") {
             verb = v;
             firstarg = 2;
         }
@@ -1095,9 +1121,12 @@ int Main(int argc, char **argv) {
     string fuzz_replay;
     string fuzz_corpus_dir;
     bool fuzz_isolate = false;
+    bool dump_prop_harness = false;
+    bool list_prop_targets = false;
+    string prop_target;
     // A build is for a deliverable: the inlining at its highest. The C
     // compiler optimizes whatever the level, unless --debug (Builder::CFlags).
-    auto optlevel = (verb == "build" || verb == "fuzz") ? 2 : 1;
+    auto optlevel = (verb == "build" || verb == "fuzz" || verb == "test") ? 2 : 1;
     vector<string> cdefines, progargs, includenames, files;
     for (int i = firstarg; i < argc; i++) {
         string arg = argv[i];
@@ -1200,8 +1229,17 @@ int Main(int argc, char **argv) {
         else if (arg == "--update") package_update = true;
         else if (arg == "--offline") package_nofetch = true;
         else if (arg == "--dump-docs") dumpdocs = true;
-        else if (arg == "--target" && i + 1 < argc) fuzz_target = argv[++i];
-        else if (arg == "--list-targets") fuzz_list_targets = true;
+        else if (arg == "--dump-prop-harness") dump_prop_harness = true;
+        else if (arg == "--list-prop-targets") list_prop_targets = true;
+        else if (arg == "--prop-target" && i + 1 < argc) prop_target = argv[++i];
+        else if (arg == "--target" && i + 1 < argc) {
+            fuzz_target = argv[++i];
+            if (prop_target.empty()) prop_target = fuzz_target;
+        }
+        else if (arg == "--list-targets") {
+            fuzz_list_targets = true;
+            list_prop_targets = true;
+        }
         else if (arg == "--timeout" && i + 1 < argc) fuzz_timeout = atoi(argv[++i]);
         else if (arg == "--max-len" && i + 1 < argc) fuzz_max_len = atoll(argv[++i]);
         else if (arg == "--seed" && i + 1 < argc) {
@@ -1257,7 +1295,7 @@ int Main(int argc, char **argv) {
         // Parsing is what fetches: every package the root declares is
         // fetched as its entry is reached.
         parseonly = true;
-    } else if (verb == "build" || verb == "fuzz") {
+    } else if (verb == "build" || verb == "fuzz" || verb == "test") {
         if (multitest || !headername.empty()) {
             fprintf(stderr, "goose %s takes one program and no --header; the flag form "
                             "(-o out.c) writes the C for a C host\n", verb.c_str());
@@ -1289,7 +1327,7 @@ int Main(int argc, char **argv) {
     // With no output file the program is compiled into this process and run,
     // which is what --jit asks for explicitly; a build writes the C to its
     // build directory instead.
-    auto jit = (verb != "build" && verb != "fuzz") && (forcejit || outname.empty());
+    auto jit = (verb != "build" && verb != "fuzz" && verb != "test") && (forcejit || outname.empty());
     if (!headername.empty() && (jit || multitest)) {
         fprintf(stderr, "--header requires C output for a single input file\n");
         return 1;
@@ -1376,6 +1414,32 @@ int Main(int argc, char **argv) {
         TypeCheckProgram(ast, library, nocgen);
         // The checker reported the errors it went on past, root by root.
         if (!ast.errors.empty()) return 1;
+        if (list_prop_targets) {
+            auto targets = ListPropTargets(ast);
+            for (auto &t : targets) {
+                printf("%s\n", t.c_str());
+            }
+            return 0;
+        }
+        if (dump_prop_harness) {
+            string harness;
+            string filter = !prop_target.empty() ? prop_target : fuzz_target;
+            PropHarnessOptions popts;
+            popts.target_filter = filter;
+            popts.seed = fuzz_seed;
+            popts.replay = fuzz_replay;
+            popts.corpus_dir = fuzz_corpus_dir;
+            popts.timeout_sec = fuzz_timeout;
+            popts.max_len = fuzz_max_len;
+            popts.verbose = verbose;
+            if (GeneratePropHarness(ast, filename, popts, harness)) {
+                fputs(harness.c_str(), stdout);
+                return 0;
+            } else {
+                fprintf(stderr, "no property targets matched\n");
+                return 1;
+            }
+        }
         Optimizer opt(ast, optlevel);
         if (specs) {
             string s;
@@ -1519,7 +1583,7 @@ int Main(int argc, char **argv) {
                 outfile.replace(pos, 1, stem);
         }
         includes = includenames;
-        if (verb == "build" || verb == "fuzz") {
+        if (verb == "build" || verb == "fuzz" || verb == "test") {
             builddir = ProgramBuildDir(file);
             std::error_code ec;
             filesystem::create_directories(filesystem::path(builddir), ec);
@@ -1546,7 +1610,7 @@ int Main(int argc, char **argv) {
             // (CMakeLists.txt).
             auto code = RunOnCompilerStack(compile);
             if (code) return code;
-            if (verb == "build" || verb == "fuzz") {
+            if (verb == "build" || verb == "fuzz" || verb == "test") {
                 if (nocgen) return 0;
                 // The native parts first, so that the link can take their
                 // response files: a builtin package's from the compiler's
@@ -1617,19 +1681,133 @@ int Main(int argc, char **argv) {
         if (jsondiag) fputs(DiagnosticsJson(found, astp.get()).c_str(), stdout);
         return code;
     };
+    if (verb == "test") {
+        try {
+            auto targetfile = files[0];
+            Ast ast;
+            auto stdlibdirs = StdlibDirs(stdlibdir, exe);
+            ParseProgram(ast, targetfile, stdlibdirs, DirOf(exe));
+            if (!ast.errors.empty()) return 1;
+            ResolveTypeNames(ast);
+            if (!ast.errors.empty()) return 1;
+            TypeCheckProgram(ast, false, true);
+            if (!ast.errors.empty()) return 1;
+
+            if (list_prop_targets || fuzz_list_targets) {
+                auto targets = ListPropTargets(ast);
+                for (auto &t : targets) {
+                    printf("%s\n", t.c_str());
+                }
+                return 0;
+            }
+
+            if (ast.props.empty()) {
+                printf("no property tests found in %s\n", targetfile.c_str());
+                return 0;
+            }
+
+            PropHarnessOptions popts;
+            popts.target_filter = !prop_target.empty() ? prop_target : fuzz_target;
+            popts.seed = fuzz_seed;
+            popts.replay = fuzz_replay;
+            popts.corpus_dir = fuzz_corpus_dir;
+            popts.timeout_sec = fuzz_timeout;
+            popts.max_len = fuzz_max_len;
+            popts.is_fuzz = false;
+            popts.verbose = verbose;
+
+            string harness;
+            if (!GeneratePropHarness(ast, targetfile, popts, harness)) {
+                if (!popts.target_filter.empty()) {
+                    fprintf(stderr, "property target '%s' not found in %s\n", popts.target_filter.c_str(), targetfile.c_str());
+                } else {
+                    fprintf(stderr, "no property tests found in %s\n", targetfile.c_str());
+                }
+                return 1;
+            }
+
+            auto target_stem = PathStem(targetfile);
+            auto harness_file = cat(DirOf(targetfile), ".goose_test_", target_stem, ".goose");
+            if (!WriteFileMakingDirs(harness_file, harness)) {
+                fprintf(stderr, "cannot write test harness file: %s\n", harness_file.c_str());
+                return 1;
+            }
+
+            if (buildopts.exe.empty()) {
+                builddir = ProgramBuildDir(harness_file);
+                std::error_code ec;
+                filesystem::create_directories(filesystem::path(builddir), ec);
+                string exe_suffix = popts.target_filter.empty() ? "" : cat("_", SanitizePropIdentifier(popts.target_filter));
+                buildopts.exe = cat(builddir, "/test_", target_stem, exe_suffix);
+                #ifdef _WIN32
+                buildopts.exe += ".exe";
+                #endif
+            }
+
+            auto code = run(harness_file);
+            std::error_code ec;
+            filesystem::remove(filesystem::path(harness_file), ec);
+            if (code != 0 || dryrun || nocgen) return code;
+
+            string cmd = cat("\"", buildopts.exe, "\"");
+            for (auto &a : progargs) {
+                cmd += " \"";
+                for (char c : a) {
+                    if (c == '"') cmd += "\\\"";
+                    else cmd += c;
+                }
+                cmd += "\"";
+            }
+            fflush(stdout);
+            fflush(stderr);
+            int status = system(cmd.c_str());
+            int exit_code = 0;
+            #ifdef _WIN32
+            exit_code = status;
+            #else
+            if (WIFEXITED(status)) exit_code = WEXITSTATUS(status);
+            else if (WIFSIGNALED(status)) exit_code = 128 + WTERMSIG(status);
+            else exit_code = status;
+            #endif
+            return exit_code;
+        } catch (CompileError &e) {
+            fprintf(stderr, "%s\n", e.msg.c_str());
+            return 1;
+        }
+    }
     if (verb == "fuzz") {
         auto targetfile = files[0];
         Ast ast;
         auto stdlibdirs = StdlibDirs(stdlibdir, exe);
         ParseProgram(ast, targetfile, stdlibdirs, DirOf(exe));
         if (!ast.errors.empty()) return 1;
+        ResolveTypeNames(ast);
+        if (!ast.errors.empty()) return 1;
+        if (!ast.props.empty()) {
+            TypeCheckProgram(ast, false, true);
+            if (!ast.errors.empty()) return 1;
+        }
 
-        vector<SFunction *> targets;
+        struct FuzzTarget {
+            enum Kind { FUNCTION, PROP };
+            Kind kind;
+            string name;
+            int line;
+            SFunction *fn = nullptr;
+            PropDecl *prop = nullptr;
+        };
+
+        vector<FuzzTarget> targets;
         for (auto sf : ast.functions) {
             if (sf->line.fileidx == 0 && !sf->isnested &&
                 (sf->isfuzz || sf->name.rfind("fuzz_", 0) == 0) && sf->name != "main") {
-                targets.push_back(sf);
+                targets.push_back(FuzzTarget { FuzzTarget::FUNCTION, string(sf->name), sf->line.line, sf, nullptr });
             }
+        }
+        int prop_idx = 0;
+        for (auto prop : ast.props) {
+            string pname = ComputePropTargetName(prop, prop_idx++);
+            targets.push_back(FuzzTarget { FuzzTarget::PROP, pname, prop->line.line, nullptr, prop });
         }
 
         if (fuzz_list_targets) {
@@ -1637,43 +1815,114 @@ int Main(int argc, char **argv) {
                 printf("no fuzz targets found in %s\n", targetfile.c_str());
             } else {
                 printf("fuzz targets in %s:\n", targetfile.c_str());
-                for (auto sf : targets) {
-                    printf("  %s (line %d)\n", string(sf->name).c_str(), sf->line.line);
+                for (auto &t : targets) {
+                    printf("  %s (line %d)\n", t.name.c_str(), t.line);
                 }
             }
             return 0;
         }
 
         if (targets.empty()) {
-            fprintf(stderr, "no fuzz targets found in %s (mark with 'fuzz fn' or prefix with 'fuzz_')\n",
+            fprintf(stderr, "no fuzz targets found in %s (mark with 'fuzz fn', prefix with 'fuzz_', or define 'prop')\n",
                     targetfile.c_str());
             return 1;
         }
 
-        SFunction *chosen = nullptr;
+        const FuzzTarget *picked = nullptr;
         if (fuzz_target.empty()) {
             if (targets.size() == 1) {
-                chosen = targets[0];
+                picked = &targets[0];
             } else {
                 fprintf(stderr, "multiple fuzz targets found in %s; specify which with --target <name>:\n",
                         targetfile.c_str());
-                for (auto sf : targets) {
-                    fprintf(stderr, "  %s\n", string(sf->name).c_str());
+                for (auto &t : targets) {
+                    fprintf(stderr, "  %s\n", t.name.c_str());
                 }
                 return 1;
             }
         } else {
-            for (auto sf : targets) {
-                if (sf->name == fuzz_target || sf->qname == fuzz_target) {
-                    chosen = sf;
-                    break;
+            for (auto &t : targets) {
+                if (t.kind == FuzzTarget::FUNCTION) {
+                    if (t.fn->name == fuzz_target || t.fn->qname == fuzz_target) {
+                        picked = &t;
+                        break;
+                    }
+                } else if (t.kind == FuzzTarget::PROP) {
+                    if (MatchesPropTarget(t.prop, t.name, fuzz_target)) {
+                        picked = &t;
+                        break;
+                    }
                 }
             }
-            if (!chosen) {
+            if (!picked) {
                 fprintf(stderr, "fuzz target '%s' not found in %s\n", fuzz_target.c_str(), targetfile.c_str());
                 return 1;
             }
         }
+
+        if (picked->kind == FuzzTarget::PROP) {
+            PropHarnessOptions popts;
+            popts.target_filter = picked->name;
+            popts.seed = fuzz_seed;
+            popts.replay = fuzz_replay;
+            popts.corpus_dir = fuzz_corpus_dir;
+            popts.timeout_sec = fuzz_timeout;
+            popts.max_len = fuzz_max_len;
+            popts.is_fuzz = true;
+            popts.verbose = verbose;
+
+            string harness;
+            if (!GeneratePropHarness(ast, targetfile, popts, harness)) {
+                fprintf(stderr, "failed to synthesize fuzz harness for property '%s'\n", picked->name.c_str());
+                return 1;
+            }
+
+            auto target_stem = PathStem(targetfile);
+            auto harness_file = cat(DirOf(targetfile), ".goose_fuzz_", target_stem, ".goose");
+            if (!WriteFileMakingDirs(harness_file, harness)) {
+                fprintf(stderr, "cannot write fuzz harness file: %s\n", harness_file.c_str());
+                return 1;
+            }
+
+            if (buildopts.exe.empty()) {
+                builddir = ProgramBuildDir(harness_file);
+                std::error_code ec;
+                filesystem::create_directories(filesystem::path(builddir), ec);
+                buildopts.exe = cat(builddir, "/fuzz_", target_stem, "_", SanitizePropIdentifier(picked->name));
+                #ifdef _WIN32
+                buildopts.exe += ".exe";
+                #endif
+            }
+
+            auto code = run(harness_file);
+            std::error_code ec;
+            filesystem::remove(filesystem::path(harness_file), ec);
+            if (code != 0 || dryrun || nocgen) return code;
+
+            string cmd = cat("\"", buildopts.exe, "\"");
+            for (auto &a : progargs) {
+                cmd += " \"";
+                for (char c : a) {
+                    if (c == '"') cmd += "\\\"";
+                    else cmd += c;
+                }
+                cmd += "\"";
+            }
+            fflush(stdout);
+            fflush(stderr);
+            int status = system(cmd.c_str());
+            int exit_code = 0;
+            #ifdef _WIN32
+            exit_code = status;
+            #else
+            if (WIFEXITED(status)) exit_code = WEXITSTATUS(status);
+            else if (WIFSIGNALED(status)) exit_code = 128 + WTERMSIG(status);
+            else exit_code = status;
+            #endif
+            return exit_code;
+        }
+
+        SFunction *chosen = picked->fn;
 
         enum ParamKind { PK_NONE, PK_BYTES, PK_STRING, PK_DRIVER };
         ParamKind pkind = PK_NONE;
@@ -1855,7 +2104,7 @@ int Main(int argc, char **argv) {
         auto code = run(harness_file);
         std::error_code ec;
         filesystem::remove(filesystem::path(harness_file), ec);
-        if (code != 0 || dryrun) return code;
+        if (code != 0 || dryrun || nocgen) return code;
 
         string cmd = cat("\"", buildopts.exe, "\"");
         for (auto &a : progargs) {

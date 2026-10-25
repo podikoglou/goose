@@ -2417,6 +2417,9 @@ fn ::for_each<F>(c: Config) {
     let res = run(c, F);
     if !res.passed {
         print("======================== Test Failure ========================");
+        if c.opt_fuzz_target_name.len > 0 {
+            print("Target: ", c.opt_fuzz_target_name);
+        }
         if c.opt_has_replay {
             if c.opt_replay_file.len > 0 {
                 print("Replay failed from artifact: ", c.opt_replay_file);
@@ -2443,20 +2446,21 @@ fn ::for_each<F>(c: Config) {
         print("Reproduction:");
         let is_cli_fuzz = c.opt_fuzz_source_file.len > 0 && c.opt_fuzz_target_name.len > 0;
         if is_cli_fuzz {
-            // CLI fuzz target: users never see check().for_each(); give them the goose fuzz command.
+            let cmd_verb = if c.opt_fuzz { "goose fuzz " } else { "goose test " };
+            // CLI fuzz/test target: users never see check().for_each(); give them the goose test/fuzz command.
             if res.saved_crash_file.len > 0 {
-                print("  goose fuzz ", c.opt_fuzz_source_file,
+                print("  ", cmd_verb, c.opt_fuzz_source_file,
                       " --target ", c.opt_fuzz_target_name,
                       " --replay ", res.saved_crash_file);
                 if res.shrunk_bytes_len > 0 {
                     print("  (or paste the hex above into --replay)");
                 }
             } else if res.shrunk_bytes_len > 0 {
-                print("  goose fuzz ", c.opt_fuzz_source_file,
+                print("  ", cmd_verb, c.opt_fuzz_source_file,
                       " --target ", c.opt_fuzz_target_name,
                       " --replay \"<hex-from-above>\"");
             } else if res.failed_seed != 0 {
-                print("  goose fuzz ", c.opt_fuzz_source_file,
+                print("  ", cmd_verb, c.opt_fuzz_source_file,
                       " --target ", c.opt_fuzz_target_name,
                       " --seed ", res.failed_seed);
             }
@@ -2524,6 +2528,9 @@ fn ::for_each_contained<W>(c: Config) {
     let res = run_contained(c, W);
     if !res.passed {
         print("======================== Test Failure ========================");
+        if c.opt_fuzz_target_name.len > 0 {
+            print("Target: ", c.opt_fuzz_target_name);
+        }
         if c.opt_has_replay {
             if c.opt_replay_file.len > 0 {
                 print("Replay failed from artifact: ", c.opt_replay_file);
@@ -2550,20 +2557,21 @@ fn ::for_each_contained<W>(c: Config) {
         print("Reproduction:");
         let is_cli_fuzz = c.opt_fuzz_source_file.len > 0 && c.opt_fuzz_target_name.len > 0;
         if is_cli_fuzz {
-            // CLI fuzz target: users never see run_contained; give them the goose fuzz command.
+            let cmd_verb = if c.opt_fuzz { "goose fuzz " } else { "goose test " };
+            // CLI fuzz/test target: users never see run_contained; give them the goose test/fuzz command.
             if res.saved_crash_file.len > 0 {
-                print("  goose fuzz ", c.opt_fuzz_source_file,
+                print("  ", cmd_verb, c.opt_fuzz_source_file,
                       " --target ", c.opt_fuzz_target_name,
                       " --replay ", res.saved_crash_file);
                 if res.shrunk_bytes_len > 0 {
                     print("  (or paste the hex above into --replay)");
                 }
             } else if res.shrunk_bytes_len > 0 {
-                print("  goose fuzz ", c.opt_fuzz_source_file,
+                print("  ", cmd_verb, c.opt_fuzz_source_file,
                       " --target ", c.opt_fuzz_target_name,
                       " --replay \"<hex-from-above>\"");
             } else if res.failed_seed != 0 {
-                print("  goose fuzz ", c.opt_fuzz_source_file,
+                print("  ", cmd_verb, c.opt_fuzz_source_file,
                       " --target ", c.opt_fuzz_target_name,
                       " --seed ", res.failed_seed);
             }

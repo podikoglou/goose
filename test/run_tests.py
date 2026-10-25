@@ -2131,6 +2131,26 @@ def main():
             r.fail("documentation comments", str(e))
     r.show_task(doc_comments)
 
+    def prop_lowering():
+        from test_lower_prop import check_prop_lowering
+        try:
+            check_prop_lowering(exe, gendir)
+            r.ok("declarative property lowering: proptest harness synthesis, interval narrowing, "
+                 "dependency bounds, slice buffers, and assumption filters")
+        except (RuntimeError, OSError, subprocess.TimeoutExpired) as e:
+            r.fail("declarative property lowering", str(e))
+    r.show_task(prop_lowering)
+
+    def prop_cli():
+        from test_prop_cli import check_prop_cli
+        try:
+            check_prop_cli(exe, gendir)
+            r.ok("declarative property CLI: goose test command, targets discovery, "
+                 "passing/failing execution, seed/replay reproduction, and fuzz integration")
+        except (RuntimeError, OSError, subprocess.TimeoutExpired) as e:
+            r.fail("declarative property CLI", str(e))
+    r.show_task(prop_cli)
+
     def lsp_protocol():
         from lsp_protocol import check_lsp_protocol
         try:
