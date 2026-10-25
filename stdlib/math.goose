@@ -7,7 +7,19 @@
 // set errno are libm's under the runtime's names, which tell the C compiler
 // they depend on their arguments alone (Goose has no errno).
 
+prop "sqrt square identity" for (x: f64) where x in 0..=10000 {
+    let diff = sqrt(x * x) - x;
+    diff < 1e-5 && diff > -1e-5
+}
 extern fn sqrt(x: f64) -> f64 = "gs_sqrt";            extern fn sqrt(x: f32) -> f32 = "gs_sqrtf";
+
+prop "pythagorean identity" for (deg: f64) where deg in -360..=360 {
+    let rad = radians(deg);
+    let s = sin(rad);
+    let c = cos(rad);
+    let diff = s * s + c * c - 1.0;
+    diff < 1e-6 && diff > -1e-6
+}
 extern fn sin(x: f64) -> f64 = "gs_sin";              extern fn sin(x: f32) -> f32 = "gs_sinf";
 extern fn cos(x: f64) -> f64 = "gs_cos";              extern fn cos(x: f32) -> f32 = "gs_cosf";
 extern fn tan(x: f64) -> f64 = "gs_tan";              extern fn tan(x: f32) -> f32 = "gs_tanf";
@@ -15,11 +27,20 @@ extern fn asin(x: f64) -> f64 = "gs_asin";            extern fn asin(x: f32) -> 
 extern fn acos(x: f64) -> f64 = "gs_acos";            extern fn acos(x: f32) -> f32 = "gs_acosf";
 extern fn atan(x: f64) -> f64 = "gs_atan";            extern fn atan(x: f32) -> f32 = "gs_atanf";
 extern fn atan2(y: f64, x: f64) -> f64 = "gs_atan2";  extern fn atan2(y: f32, x: f32) -> f32 = "gs_atan2f";
+
+prop "exp log inverse" for (x: f64) where x in 1..=500 {
+    let diff = log(exp(x)) - x;
+    diff < 1e-5 && diff > -1e-5
+}
 extern fn exp(x: f64) -> f64 = "gs_exp";              extern fn exp(x: f32) -> f32 = "gs_expf";
 extern fn log(x: f64) -> f64 = "gs_log";              extern fn log(x: f32) -> f32 = "gs_logf";
 extern fn log2(x: f64) -> f64 = "gs_log2";            extern fn log2(x: f32) -> f32 = "gs_log2f";
 extern fn log10(x: f64) -> f64 = "gs_log10";          extern fn log10(x: f32) -> f32 = "gs_log10f";
 extern fn pow(x: f64, y: f64) -> f64 = "gs_pow";      extern fn pow(x: f32, y: f32) -> f32 = "gs_powf";
+
+prop "floor ceil bounds" for (x: f64) where x in -10000..=10000 {
+    floor(x) <= x && x <= ceil(x)
+}
 extern fn floor(x: f64) -> f64;                       extern fn floor(x: f32) -> f32 = "floorf";
 extern fn ceil(x: f64) -> f64;                        extern fn ceil(x: f32) -> f32 = "ceilf";
 extern fn round(x: f64) -> f64;                       extern fn round(x: f32) -> f32 = "roundf";
@@ -28,8 +49,13 @@ extern fn trunc(x: f64) -> f64;                       extern fn trunc(x: f32) ->
 let PI = 3.141592653589793;
 let TAU = 6.283185307179586;
 
+prop "radians degrees roundtrip" for (deg: f64) where deg in -360..=360 {
+    let diff = degrees(radians(deg)) - deg;
+    diff < 1e-6 && diff > -1e-6
+}
 fn radians(deg: f64) -> f64 { deg * (PI / 180.0) }
 fn degrees(rad: f64) -> f64 { rad * (180.0 / PI) }
 
 fn is_nan(x: f64) -> bool { x != x }
 fn is_inf(x: f64) -> bool { x == x && (x - x) != (x - x) }
+

@@ -39,6 +39,23 @@ fn value(c: u8) -> u8 {
 
 // Appends the text of `src` to `out`: four characters for every three bytes,
 // the last group padded with '='.
+prop "length invariant" for (src: const u8[:]) where src.len in 0..=4096 {
+    var enc: u8[>..] = [];
+    encode(enc, src);
+    enc.len == ((src.len + 2) / 3) * 4
+}
+prop "valid alphabet" for (src: const u8[:]) where src.len in 0..=4096 {
+    var enc: u8[>..] = [];
+    encode(enc, src);
+    var valid = true;
+    for c in enc {
+        if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '+' || c == '/' || c == '=') {
+            valid = false;
+            break;
+        }
+    }
+    valid
+}
 simd fn encode(out: u8[>..]&, src: const u8[:]) {
     let start = out.len;
     out.resize(start + (src.len + 2) / 3 * 4, 0);
@@ -67,6 +84,12 @@ simd fn encode(out: u8[>..]&, src: const u8[:]) {
 // Appends the bytes `src` encodes to `out`, and returns whether `src` is
 // valid base64: whole groups of four alphabet characters, the last of which
 // may end in one or two '='. Invalid input leaves `out` as it was.
+prop "roundtrip" for (src: const u8[:]) where src.len in 0..=4096 {
+    var enc: u8[>..] = [];
+    encode(enc, src);
+    var dec: u8[>..] = [];
+    decode(dec, enc[..]) && dec[..] == src
+}
 simd fn decode(out: u8[>..]&, src: const u8[:]) -> bool {
     if src.len % 4 != 0 { return false; }
     var padding = 0;
@@ -111,3 +134,4 @@ simd fn decode(out: u8[>..]&, src: const u8[:]) -> bool {
     if !valid { out.resize(start); }
     return valid;
 }
+
