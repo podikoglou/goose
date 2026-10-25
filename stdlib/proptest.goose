@@ -38,6 +38,7 @@ struct Config {
     opt_fuzz:           bool = false,
     opt_timeout_ms:     i64 = 0,
     opt_corpus_size:    i64 = 64,
+    opt_corpus_dir:     const u8[:] = "",
     opt_save_crashes:   bool = false,
     opt_crash_file:     const u8[:] = "",
     opt_has_replay:     bool = false,
@@ -69,6 +70,7 @@ fn ::fuzz(var c: Config) -> Config                      { c.opt_fuzz = true; c }
 fn ::fuzz(var c: Config, v: bool) -> Config             { c.opt_fuzz = v; c }
 fn ::timeout_ms(var c: Config, ms: i64) -> Config       { c.opt_timeout_ms = ms; c }
 fn ::corpus_size(var c: Config, n: i64) -> Config       { c.opt_corpus_size = n; c }
+fn ::corpus_dir(var c: Config, path: const u8[:]) -> Config { c.opt_corpus_dir = path; c }
 fn ::save_crashes(var c: Config) -> Config              { c.opt_save_crashes = true; c }
 fn ::save_crashes(var c: Config, v: bool) -> Config     { c.opt_save_crashes = v; c }
 fn ::crash_file(var c: Config, path: const u8[:]) -> Config {
@@ -111,6 +113,7 @@ fn fuzz(var c: Config) -> Config                      { ::fuzz(c) }
 fn fuzz(var c: Config, v: bool) -> Config             { ::fuzz(c, v) }
 fn timeout_ms(var c: Config, ms: i64) -> Config       { ::timeout_ms(c, ms) }
 fn corpus_size(var c: Config, n: i64) -> Config       { ::corpus_size(c, n) }
+fn corpus_dir(var c: Config, path: const u8[:]) -> Config { ::corpus_dir(c, path) }
 fn save_crashes(var c: Config) -> Config              { ::save_crashes(c) }
 fn save_crashes(var c: Config, v: bool) -> Config     { ::save_crashes(c, v) }
 fn crash_file(var c: Config, path: const u8[:]) -> Config { ::crash_file(c, path) }
@@ -1200,7 +1203,7 @@ fn ::mut_byte_replace(buf: u8[>..]&, r: rng&) {
 
 fn ::mut_byte_delete(buf: u8[>..]&, r: rng&, min_len: i64) {
     if buf.len <= min_len { return; }
-    let max_del = if (buf.len - min_len) < 4 { buf.len - min_len } else { 4 };
+    let max_del = if (buf.len - min_len) < 16 { buf.len - min_len } else { 16 };
     let del_count = 1 + rand_int(r, max_del);
     let start_idx = rand_int(r, buf.len - del_count + 1);
 
@@ -1223,6 +1226,70 @@ fn ::mut_byte_insert(buf: u8[>..]&, r: rng&, max_len: i64) {
     }
     for i in insert_idx..buf.len { res.push(buf[i]); }
     buf = copy(res);
+}
+
+fn ::mut_insert_repeated_bytes(buf: u8[>..]&, r: rng&, max_len: i64) {
+    if buf.len >= max_len { return; }
+    let max_avail = max_len - buf.len;
+    let limit = if max_avail < 16 { max_avail } else { 16 };
+    if limit < 2 { return; }
+    let count = 2 + rand_int(r, limit - 1);
+    let b = (rand_u64(r) & 0xFF) as u8;
+    let pos = if buf.len > 0 { rand_int(r, buf.len + 1) } else { 0 };
+    var res: u8[>..] = [];
+    for i in pos { res.push(buf[i]); }
+    for _ in count { res.push(b); }
+    for i in pos..buf.len { res.push(buf[i]); }
+    buf = copy(res);
+}
+
+fn ::mut_shuffle_bytes(buf: u8[>..]&, r: rng&) {
+    if buf.len < 2 { return; }
+    let max_shuf = if buf.len < 8 { buf.len } else { 8 };
+    if max_shuf < 2 { return; }
+    let shuf_len = 2 + rand_int(r, max_shuf - 1);
+    let start = rand_int(r, buf.len - shuf_len + 1);
+    var i = shuf_len - 1;
+    while i > 0 {
+        let j = rand_int(r, i + 1);
+        let tmp = buf[start + i];
+        buf[start + i] = buf[start + j];
+        buf[start + j] = tmp;
+        i -= 1;
+    }
+}
+
+fn ::mut_cross_over(
+    buf: u8[>..]&,
+    r: rng&,
+    corpus_data: const u8[:],
+    corpus_lens: const i64[:],
+    corpus_offsets: const i64[:],
+    max_len: i64
+) {
+    if corpus_lens.len == 0 || buf.len < 2 { return; }
+    let other_idx = rand_int(r, corpus_lens.len);
+    let other_len = corpus_lens[other_idx];
+    if other_len == 0 { return; }
+    let other_off = corpus_offsets[other_idx];
+
+    let max_chunk = if other_len < 16 { other_len } else { 16 };
+    let chunk_len = 1 + rand_int(r, max_chunk);
+    let other_start = rand_int(r, other_len - chunk_len + 1);
+
+    if (rand_u64(r) & 1) == 0 && buf.len >= chunk_len {
+        let pos = rand_int(r, buf.len - chunk_len + 1);
+        for i in chunk_len {
+            buf[pos + i] = corpus_data[other_off + other_start + i];
+        }
+    } else if buf.len + chunk_len <= max_len {
+        let pos = rand_int(r, buf.len + 1);
+        var res: u8[>..] = [];
+        for i in pos { res.push(buf[i]); }
+        for i in chunk_len { res.push(corpus_data[other_off + other_start + i]); }
+        for i in pos..buf.len { res.push(buf[i]); }
+        buf = copy(res);
+    }
 }
 
 fn ::mut_chunk_copy(buf: u8[>..]&, r: rng&, max_len: i64) {
@@ -1272,25 +1339,99 @@ fn ::mut_interesting_int(buf: u8[>..]&, r: rng&) {
         buf[pos + 1] = ((v >> 8) & 0xFF) as u8;
         buf[pos + 2] = ((v >> 16) & 0xFF) as u8;
         buf[pos + 3] = ((v >> 24) & 0xFF) as u8;
+    } else {
+        let v = if rand_int(r, 2) == 0 { 0 } else { 0xFF };
+        for i in 8 { buf[pos + i] = v as u8; }
     }
 }
 
-fn ::mutate(buf: u8[>..]&, r: rng&, min_len: i64, max_len: i64) {
+fn ::mutate_with_log(
+    buf: u8[>..]&,
+    r: rng&,
+    min_len: i64,
+    max_len: i64,
+    corpus_data: const u8[:],
+    corpus_lens: const i64[:],
+    corpus_offsets: const i64[:],
+    mut_stack: u8[>..]&
+) -> i64 {
     if buf.len == 0 {
         buf.push((rand_u64(r) & 0xFF) as u8);
-        return;
+        _push_str(mut_stack, "InsertByte-");
+        return 1;
     }
-    let n_mutations = 1 + rand_int(r, 3);
+    let n_mutations = 1 + rand_int(r, 4);
+    var actual_count: i64 = 0;
     for _ in n_mutations {
-        let op = rand_int(r, 7);
-        if op == 0 { mut_bit_flip(buf, r); }
-        else if op == 1 { mut_byte_flip(buf, r); }
-        else if op == 2 { mut_byte_replace(buf, r); }
-        else if op == 3 { mut_byte_delete(buf, r, min_len); }
-        else if op == 4 { mut_byte_insert(buf, r, max_len); }
-        else if op == 5 { mut_chunk_copy(buf, r, max_len); }
-        else { mut_interesting_int(buf, r); }
+        let op = rand_int(r, 9);
+        if op == 0 {
+            mut_bit_flip(buf, r);
+            _push_str(mut_stack, "ChangeBit-");
+            actual_count += 1;
+        } else if op == 1 {
+            if (rand_u64(r) & 1) == 0 { mut_byte_flip(buf, r); } else { mut_byte_replace(buf, r); }
+            _push_str(mut_stack, "ChangeByte-");
+            actual_count += 1;
+        } else if op == 2 {
+            mut_interesting_int(buf, r);
+            _push_str(mut_stack, "ChangeBinInt-");
+            actual_count += 1;
+        } else if op == 3 {
+            if buf.len > min_len {
+                mut_byte_delete(buf, r, min_len);
+                _push_str(mut_stack, "EraseBytes-");
+                actual_count += 1;
+            }
+        } else if op == 4 {
+            if buf.len < max_len {
+                mut_byte_insert(buf, r, max_len);
+                _push_str(mut_stack, "InsertByte-");
+                actual_count += 1;
+            }
+        } else if op == 5 {
+            if buf.len + 2 <= max_len {
+                mut_insert_repeated_bytes(buf, r, max_len);
+                _push_str(mut_stack, "InsertRepeatedBytes-");
+                actual_count += 1;
+            }
+        } else if op == 6 {
+            if buf.len >= 2 {
+                mut_chunk_copy(buf, r, max_len);
+                _push_str(mut_stack, "CopyPart-");
+                actual_count += 1;
+            }
+        } else if op == 7 {
+            if corpus_lens.len > 0 && buf.len + 2 <= max_len {
+                mut_cross_over(buf, r, corpus_data, corpus_lens, corpus_offsets, max_len);
+                _push_str(mut_stack, "CrossOver-");
+                actual_count += 1;
+            } else {
+                mut_bit_flip(buf, r);
+                _push_str(mut_stack, "ChangeBit-");
+                actual_count += 1;
+            }
+        } else {
+            if buf.len >= 2 {
+                mut_shuffle_bytes(buf, r);
+                _push_str(mut_stack, "ShuffleBytes-");
+                actual_count += 1;
+            }
+        }
     }
+    if actual_count == 0 {
+        mut_bit_flip(buf, r);
+        _push_str(mut_stack, "ChangeBit-");
+        actual_count = 1;
+    }
+    actual_count
+}
+
+fn ::mutate(buf: u8[>..]&, r: rng&, min_len: i64, max_len: i64) {
+    var dummy: u8[>..] = [];
+    var empty_data: u8[>..] = [];
+    var empty_lens: i64[>..] = [];
+    var empty_offs: i64[>..] = [];
+    let _ = mutate_with_log(buf, r, min_len, max_len, empty_data[..], empty_lens[..], empty_offs[..], dummy);
 }
 
 fn ::_corpus_add(corpus_data: u8[>..]&, corpus_lens: i64[>..]&, corpus_offsets: i64[>..]&, entry: const u8[:]) {
@@ -1460,43 +1601,186 @@ fn ::_fuzz_stderr_is_live() -> bool {
     stderr_is_tty()
 }
 
-fn ::_print_fuzz_progress(iter: i64, elapsed_ns: i64, corpus_count: i64, max_len: i64) {
-    let elapsed_sec = elapsed_ns / 1000000000;
-    let s = elapsed_sec % 60;
-    let m = (elapsed_sec / 60) % 60;
-    let h = elapsed_sec / 3600;
-    let rate = if elapsed_sec > 0 { iter / elapsed_sec } else { 0 };
-    let live = _fuzz_stderr_is_live();
+fn ::_current_rss_mb() -> i64 {
+    var statm: u8[>..] = [];
+    if read_file("/proc/self/statm", statm) {
+        var resident_pages: i64 = 0;
+        var in_first = true;
+        var count: i64 = 0;
+        for b in statm {
+            if b == 32 || b == 10 || b == 9 {
+                if in_first {
+                    in_first = false;
+                } else if count > 0 {
+                    break;
+                }
+            } else if !in_first && b >= 48 && b <= 57 {
+                resident_pages = resident_pages * 10 + (b - 48);
+                count += 1;
+            }
+        }
+        if resident_pages > 0 {
+            let mb = (resident_pages * 4) / 1024;
+            return if mb < 1 { 1 } else { mb };
+        }
+    }
+    32
+}
 
+fn ::_push_u64(out: u8[>..]&, n: u64) {
+    if n == 0 { out.push(48); return; }
+    var v = n;
+    var digits: u8[32] = [0; 32];
+    var count = 0;
+    while v > 0 {
+        digits[count] = (48 + ((v % 10) as u8));
+        count += 1;
+        v = v / 10;
+    }
+    for idx in count {
+        out.push(digits[count - 1 - idx]);
+    }
+}
+
+fn ::_token_class(b: u8) -> u64 {
+    if b == 92 { 1 } // '\'
+    else if b == 40 || b == 41 { 2 } // '(' or ')'
+    else if b == 91 || b == 93 { 3 } // '[' or ']'
+    else if b == 42 || b == 43 || b == 63 || b == 123 || b == 125 { 4 } // '*+?{}'
+    else if b == 124 { 5 } // '|'
+    else if b == 94 || b == 36 { 6 } // '^$'
+    else if b == 46 { 7 } // '.'
+    else if b >= 48 && b <= 57 { 8 } // digit
+    else if (b >= 65 && b <= 90) || (b >= 97 && b <= 122) { 9 } // letter
+    else if b == 0 { 10 } // null
+    else { 11 }
+}
+
+fn ::_compute_cand_sig(cand: const u8[:], d: Driver&, ok: bool) -> u64 {
+    var syntax_mask: u64 = 0;
+    var transitions: u64 = 0;
+    var prev_t: u64 = 0;
+
+    for b in cand {
+        let t = _token_class(b);
+        syntax_mask |= ((1 as u64) << t);
+        if prev_t > 0 && (t != prev_t || t <= 7) {
+            let trans = ((prev_t * 7) + t) & 63;
+            transitions |= ((1 as u64) << trans);
+        }
+        prev_t = t;
+    }
+
+    var cursor_profile: u64 = 0;
+    if d.cursor > 0 {
+        if cand.len > 0 && d.cursor >= cand.len {
+            cursor_profile = 2;
+        } else {
+            cursor_profile = 1;
+        }
+    }
+
+    var sig: u64 = 14695981039346656037;
+    sig = (sig ^ syntax_mask) * 1099511628211;
+    sig = (sig ^ (transitions << 12)) * 1099511628211;
+    sig = (sig ^ (cursor_profile << 28)) * 1099511628211;
+    if ok { sig = sig ^ 0x5555555555555555; }
+    if d.assumed_false { sig = sig ^ 0xAAAAAAAAAAAAAAAA; }
+    if d.exhausted { sig = sig ^ 0x3333333333333333; }
+    sig
+}
+
+fn ::_print_fuzz_info(c: Config, seed_files_count: i64, min_len: i64, max_len: i64, total_bytes: i64) {
     var line: u8[>..] = [];
-    if live { line.push(13); } else { line.push(10); } // '\r' live, '\n' plain
-    line.push(32); line.push(32); // "  "
-    line.push(91); // '['
-    _push_num_padded(line, h, 2);
-    line.push(58); // ':'
-    _push_num_padded(line, m, 2);
-    line.push(58); // ':'
-    _push_num_padded(line, s, 2);
-    line.push(93); // ']'
-    _push_str(line, " execs: ");
-    _push_num(line, iter);
-    _push_str(line, " (");
-    _push_num(line, rate);
-    _push_str(line, "/s) | corpus: ");
-    _push_num(line, corpus_count);
-    _push_str(line, " | max_len: ");
+    _push_str(line, "INFO: Seed: ");
+    _push_u64(line, seed_or_default(c));
+    line.push(10);
+
+    if c.opt_max_len <= 0 {
+        _push_str(line, "INFO: max_len: 4096 (default)\n");
+    } else {
+        _push_str(line, "INFO: max_len: ");
+        _push_num(line, c.opt_max_len);
+        line.push(10);
+    }
+
+    if c.opt_corpus_dir.len > 0 {
+        _push_str(line, "INFO: corpus directory: ");
+        _push_str(line, c.opt_corpus_dir);
+        line.push(10);
+    }
+
+    _push_str(line, "INFO: seed corpus: ");
+    _push_num(line, seed_files_count);
+    _push_str(line, " items, min: ");
+    _push_num(line, min_len);
+    _push_str(line, "b, max: ");
     _push_num(line, max_len);
-    _push_str(line, "   ");
+    _push_str(line, "b, total: ");
+    _push_num(line, total_bytes);
+    _push_str(line, "b, rss: ");
+    _push_num(line, _current_rss_mb());
+    _push_str(line, "Mb\n");
+
     write_stderr(line[..]);
 }
 
-fn ::_clear_fuzz_progress() {
-    // Only erase the live line when stderr is actually a terminal.
-    if !_fuzz_stderr_is_live() { return; }
+fn ::_print_fuzz_event(
+    iter: i64,
+    event: const u8[:],
+    cov: i64,
+    ft: i64,
+    corp_count: i64,
+    corp_bytes: i64,
+    lim: i64,
+    elapsed_ns: i64,
+    cand_len: i64,
+    max_len: i64,
+    mut_count: i64,
+    mut_stack: const u8[:]
+) {
+    let rate = if elapsed_ns >= 10000000 { (iter * 1000000000) / elapsed_ns } else { 0 };
+    let rss = _current_rss_mb();
+
     var line: u8[>..] = [];
-    line.push(13);
-    for _ in 80 { line.push(32); }
-    line.push(13);
+    line.push(35); // '#'
+    _push_num(line, iter);
+    line.push(9);  // '\t'
+    _push_str(line, event);
+    line.push(32); // ' '
+    _push_str(line, "cov: ");
+    _push_num(line, cov);
+    _push_str(line, " ft: ");
+    _push_num(line, ft);
+    _push_str(line, " corp: ");
+    _push_num(line, corp_count);
+    line.push(47); // '/'
+    _push_num(line, corp_bytes);
+    _push_str(line, "b");
+
+    if event != "INITED" {
+        _push_str(line, " lim: ");
+        _push_num(line, lim);
+    }
+
+    _push_str(line, " exec/s: ");
+    _push_num(line, rate);
+    _push_str(line, " rss: ");
+    _push_num(line, rss);
+    _push_str(line, "Mb");
+
+    if mut_count > 0 {
+        _push_str(line, " L: ");
+        _push_num(line, cand_len);
+        line.push(47); // '/'
+        _push_num(line, max_len);
+        _push_str(line, " MS: ");
+        _push_num(line, mut_count);
+        line.push(32); // ' '
+        _push_str(line, mut_stack);
+    }
+
+    line.push(10); // '\n'
     write_stderr(line[..]);
 }
 
@@ -1513,28 +1797,87 @@ fn ::_fuzz_run<F>(c: Config) -> TestResult {
     var corpus_data: u8[>..] = [];
     var corpus_lens: i64[>..] = [];
     var corpus_offsets: i64[>..] = [];
+    var total_corpus_bytes: i64 = 0;
+    var max_entry_len: i64 = 0;
+    var seed_files_count: i64 = 0;
 
-    // Seed corpus
-    var s1: u8[>..] = [0];
-    _corpus_add(corpus_data, corpus_lens, corpus_offsets, s1[..]);
+    if c.opt_corpus_dir.len > 0 && is_dir(c.opt_corpus_dir) {
+        var names: u8[>..] = [];
+        if list_dir(c.opt_corpus_dir, names) {
+            each_split(names, '\n') {
+                if it.len > 0 {
+                    let file_path = str(c.opt_corpus_dir, "/", it);
+                    if !is_dir(file_path) {
+                        var file_buf: u8[>..] = [];
+                        if read_file(file_path, file_buf) && file_buf.len > 0 && file_buf.len <= max_buf_len {
+                            _corpus_add(corpus_data, corpus_lens, corpus_offsets, file_buf[..]);
+                            total_corpus_bytes += file_buf.len;
+                            if file_buf.len > max_entry_len { max_entry_len = file_buf.len; }
+                            seed_files_count += 1;
+                        }
+                    }
+                }
+            };
+        }
+    }
 
-    var s2: u8[>..] = [];
-    let l2 = if max_buf_len < 4 { max_buf_len } else { 4 };
-    for _ in l2 { s2.push(0); }
-    if s2.len > 0 { _corpus_add(corpus_data, corpus_lens, corpus_offsets, s2[..]); }
+    if seed_files_count == 0 {
+        let default_seeds: const u8[:][10] = [
+            "",
+            "a",
+            "0",
+            "abc",
+            "hello",
+            "\\d+",
+            "(a|b)*",
+            "[a-z0-9]",
+            "((x)+)+",
+            "^.*$"
+        ];
+        for s in default_seeds {
+            var b_arr: u8[>..] = [];
+            for b in s { b_arr.push(b); }
+            if b_arr.len <= max_buf_len {
+                _corpus_add(corpus_data, corpus_lens, corpus_offsets, b_arr[..]);
+                total_corpus_bytes += b_arr.len;
+                if b_arr.len > max_entry_len { max_entry_len = b_arr.len; }
+                seed_files_count += 1;
+            }
+        }
 
-    var s3: u8[>..] = [];
-    let l3 = if max_buf_len < 16 { max_buf_len } else { 16 };
-    for _ in l3 { s3.push((rand_u64(r) & 0xFF) as u8); }
-    if s3.len > 0 { _corpus_add(corpus_data, corpus_lens, corpus_offsets, s3[..]); }
+        var s_bin4: u8[>..] = [0, 0, 0, 0];
+        _corpus_add(corpus_data, corpus_lens, corpus_offsets, s_bin4[..]);
+        total_corpus_bytes += 4;
+        if 4 > max_entry_len { max_entry_len = 4; }
+        seed_files_count += 1;
 
-    var s4: u8[>..] = [];
-    let l4 = if max_buf_len < 64 { max_buf_len } else { 64 };
-    for _ in l4 { s4.push((rand_u64(r) & 0xFF) as u8); }
-    if s4.len > 0 { _corpus_add(corpus_data, corpus_lens, corpus_offsets, s4[..]); }
+        var s_bin16: u8[>..] = [];
+        for _ in 16 { s_bin16.push((rand_u64(r) & 0xFF) as u8); }
+        _corpus_add(corpus_data, corpus_lens, corpus_offsets, s_bin16[..]);
+        total_corpus_bytes += 16;
+        if 16 > max_entry_len { max_entry_len = 16; }
+        seed_files_count += 1;
+    }
+
+    var min_seed_len: i64 = max_buf_len;
+    var max_seed_len: i64 = 0;
+    for l in corpus_lens {
+        if l < min_seed_len { min_seed_len = l; }
+        if l > max_seed_len { max_seed_len = l; }
+    }
+    if min_seed_len > max_seed_len { min_seed_len = 0; }
+
+    if c.opt_verbose {
+        _print_fuzz_info(c, seed_files_count, min_seed_len, max_seed_len, total_corpus_bytes);
+    }
+
+    var corpus_sigs: u64[>..] = [];
+    var feature_bits: u64[16] = [0; 16];
+    var sig_table: u64[2048] = [0; 2048];
+    var cov_count: i64 = 0;
+    var ft_count: i64 = 0;
 
     let start_ns = clock_ns();
-    var last_progress_ns = start_ns;
     let max_time_ns = t_limit_ms * 1000000;
     var completed: i64 = 0;
     var discarded_count: i64 = 0;
@@ -1542,28 +1885,65 @@ fn ::_fuzz_run<F>(c: Config) -> TestResult {
     var fail_iter: i64 = -1;
     var crashing_input: u8[>..] = [];
 
-    var i: i64 = 0;
-    while n_iterations <= 0 || i < n_iterations {
+    // Evaluate initial seed corpus
+    let init_count = corpus_lens.len;
+    for idx in init_count {
+        let cand = _corpus_get(corpus_data[..], corpus_lens[..], corpus_offsets[..], idx);
+        var d = make_driver_from_bytes(cand[..], max_depth);
+        let ok = F(&d);
+        if !ok && !d.assumed_false {
+            failed = true;
+            fail_iter = idx;
+            crashing_input = copy(cand);
+            completed = idx + 1;
+            break;
+        }
+
+        let sig = _compute_cand_sig(cand[..], d, ok);
+        corpus_sigs.push(sig);
+
+        let cov_slot = (sig & 1023) as i64;
+        let cov_word = cov_slot >> 6;
+        let cov_bit = (1 as u64) << (cov_slot & 63);
+        if (feature_bits[cov_word] & cov_bit) == 0 {
+            feature_bits[cov_word] |= cov_bit;
+            cov_count += 1;
+        }
+
+        let ft_slot = ((sig >> 10) & 2047) as i64;
+        if sig_table[ft_slot] != sig {
+            if sig_table[ft_slot] == 0 {
+                ft_count += 1;
+            }
+            sig_table[ft_slot] = sig;
+        }
+    }
+
+    if c.opt_verbose && !failed {
+        _print_fuzz_event(init_count, "INITED", cov_count, ft_count, corpus_lens.len, total_corpus_bytes, max_buf_len, clock_ns() - start_ns, 0, max_entry_len, 0, "");
+    }
+
+    var i: i64 = init_count;
+    completed = init_count;
+    var next_pulse_iter: i64 = 512;
+    while next_pulse_iter <= i { next_pulse_iter *= 2; }
+    var last_print_ns = clock_ns();
+
+    while !failed && (n_iterations <= 0 || i < n_iterations) {
         if t_limit_ms > 0 && (clock_ns() - start_ns) >= max_time_ns {
             break;
         }
 
-        if (i % 500) == 0 && c.opt_verbose {
-            let cur_ns = clock_ns();
-            if (cur_ns - last_progress_ns) >= 200000000 {
-                last_progress_ns = cur_ns;
-                _print_fuzz_progress(i, cur_ns - start_ns, corpus_lens.len, max_buf_len);
-            }
-        }
+        let start_lim = if max_buf_len < 64 { max_buf_len } else { 64 };
+        let lim = if max_buf_len > start_lim {
+            let l = start_lim + ((i - init_count) / 80);
+            if l > max_buf_len { max_buf_len } else { l }
+        } else { max_buf_len };
 
-        var cand: u8[>..] = [];
-        if i < corpus_lens.len {
-            cand = _corpus_get(corpus_data[..], corpus_lens[..], corpus_offsets[..], i);
-        } else {
-            let entry_idx = rand_int(r, corpus_lens.len);
-            cand = _corpus_get(corpus_data[..], corpus_lens[..], corpus_offsets[..], entry_idx);
-            mutate(cand, r, 1, max_buf_len);
-        }
+        let entry_idx = rand_int(r, corpus_lens.len);
+        var cand = _corpus_get(corpus_data[..], corpus_lens[..], corpus_offsets[..], entry_idx);
+        var mut_stack: u8[>..] = [];
+        let n_mut = mutate_with_log(cand, r, 1, lim, corpus_data[..], corpus_lens[..], corpus_offsets[..], mut_stack);
 
         var d = make_driver_from_bytes(cand[..], max_depth);
         let ok = F(&d);
@@ -1582,25 +1962,90 @@ fn ::_fuzz_run<F>(c: Config) -> TestResult {
             break;
         }
 
-        if corpus_lens.len < max_corpus {
-            var has_len = false;
-            for l in corpus_lens {
-                if l == cand.len {
-                    has_len = true;
-                    break;
+        let sig = _compute_cand_sig(cand[..], d, ok);
+
+        let cov_slot = (sig & 1023) as i64;
+        let cov_word = cov_slot >> 6;
+        let cov_bit = (1 as u64) << (cov_slot & 63);
+        if (feature_bits[cov_word] & cov_bit) == 0 {
+            feature_bits[cov_word] |= cov_bit;
+            cov_count += 1;
+        }
+
+        let ft_slot = ((sig >> 10) & 2047) as i64;
+        if sig_table[ft_slot] != sig {
+            if sig_table[ft_slot] == 0 {
+                ft_count += 1;
+            }
+            sig_table[ft_slot] = sig;
+        }
+
+        var match_idx: i64 = -1;
+        for idx in corpus_sigs.len {
+            if corpus_sigs[idx] == sig {
+                match_idx = idx;
+                break;
+            }
+        }
+
+        if match_idx == -1 {
+            if corpus_lens.len < max_corpus {
+                _corpus_add(corpus_data, corpus_lens, corpus_offsets, cand[..]);
+                corpus_sigs.push(sig);
+                total_corpus_bytes += cand.len;
+                if cand.len > max_entry_len { max_entry_len = cand.len; }
+                if c.opt_verbose {
+                    _print_fuzz_event(i, "NEW   ", cov_count, ft_count, corpus_lens.len, total_corpus_bytes, lim, clock_ns() - start_ns, cand.len, max_entry_len, n_mut, mut_stack[..]);
+                    last_print_ns = clock_ns();
+                }
+            } else {
+                var worst_idx: i64 = -1;
+                var worst_len: i64 = 0;
+                for idx in corpus_lens.len {
+                    if corpus_lens[idx] > worst_len {
+                        worst_len = corpus_lens[idx];
+                        worst_idx = idx;
+                    }
+                }
+                if worst_idx >= 0 && cand.len < worst_len {
+                    let old_len = corpus_lens[worst_idx];
+                    let off = corpus_offsets[worst_idx];
+                    for j in cand.len { corpus_data[off + j] = cand[j]; }
+                    corpus_lens[worst_idx] = cand.len;
+                    corpus_sigs[worst_idx] = sig;
+                    total_corpus_bytes -= (old_len - cand.len);
+                    if c.opt_verbose {
+                        _print_fuzz_event(i, "NEW   ", cov_count, ft_count, corpus_lens.len, total_corpus_bytes, lim, clock_ns() - start_ns, cand.len, max_entry_len, n_mut, mut_stack[..]);
+                        last_print_ns = clock_ns();
+                    }
                 }
             }
-            if !has_len || rand_int(r, 20) == 0 {
-                _corpus_add(corpus_data, corpus_lens, corpus_offsets, cand[..]);
+        } else if cand.len < corpus_lens[match_idx] {
+            let old_len = corpus_lens[match_idx];
+            let diff = old_len - cand.len;
+            let off = corpus_offsets[match_idx];
+            for j in cand.len { corpus_data[off + j] = cand[j]; }
+            corpus_lens[match_idx] = cand.len;
+            total_corpus_bytes -= diff;
+            if c.opt_verbose {
+                _print_fuzz_event(i, "REDUCE", cov_count, ft_count, corpus_lens.len, total_corpus_bytes, lim, clock_ns() - start_ns, cand.len, max_entry_len, n_mut, mut_stack[..]);
+                last_print_ns = clock_ns();
+            }
+        } else {
+            if i >= next_pulse_iter {
+                while next_pulse_iter <= i { next_pulse_iter *= 2; }
+                if c.opt_verbose {
+                    _print_fuzz_event(i, "pulse ", cov_count, ft_count, corpus_lens.len, total_corpus_bytes, lim, clock_ns() - start_ns, 0, 0, 0, "");
+                    last_print_ns = clock_ns();
+                }
+            } else if c.opt_verbose && (clock_ns() - last_print_ns) >= 3000000000 {
+                _print_fuzz_event(i, "pulse ", cov_count, ft_count, corpus_lens.len, total_corpus_bytes, lim, clock_ns() - start_ns, 0, 0, 0, "");
+                last_print_ns = clock_ns();
             }
         }
 
         i += 1;
         completed = i;
-    }
-
-    if c.opt_verbose {
-        _clear_fuzz_progress();
     }
 
     let elapsed_ns = clock_ns() - start_ns;

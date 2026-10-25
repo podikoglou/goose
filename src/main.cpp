@@ -1208,7 +1208,10 @@ int Main(int argc, char **argv) {
             string s = argv[++i];
             fuzz_seed = (s.rfind("0x", 0) == 0 || s.rfind("0X", 0) == 0) ? strtoull(s.c_str(), nullptr, 16) : strtoull(s.c_str(), nullptr, 10);
         }
-        else if (arg == "--replay" && i + 1 < argc) fuzz_replay = argv[++i];
+        else if (arg == "--replay" && i + 1 < argc) {
+            fuzz_replay = argv[++i];
+            fuzz_isolate = true;
+        }
         else if (arg == "--corpus-dir" && i + 1 < argc) fuzz_corpus_dir = argv[++i];
         else if (arg == "--isolate") fuzz_isolate = true;
         // A -D lands in the generated C itself rather than on some backend's
@@ -1811,6 +1814,7 @@ int Main(int argc, char **argv) {
         }
         if (!fuzz_corpus_dir.empty()) {
             Append(main_body, "    c = crash_file(c, \"", fuzz_corpus_dir, "/crash.bin\");\n");
+            Append(main_body, "    c = corpus_dir(c, \"", fuzz_corpus_dir, "\");\n");
         }
         // Record the source file and target name so the failure banner can
         // print a copy-pasteable `goose fuzz` replay command instead of the
