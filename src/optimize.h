@@ -972,7 +972,7 @@ inline Node *AsCast::Cp1(Inliner &inl) const {
 }
 
 inline Node *RangeExpr::Cp1(Inliner &inl) const {
-    return inl.ast.New<RangeExpr>(line, inl.Cp(lo), inl.Cp(hi));
+    return inl.ast.New<RangeExpr>(line, inl.Cp(lo), inl.Cp(hi), inclusive);
 }
 
 inline Node *Block::Cp1(Inliner &inl) const {
@@ -1081,6 +1081,7 @@ inline Node *FunVal::Cp1(Inliner &) const { assert(false); return const_cast<Fun
 inline Node *StructDecl::Cp1(Inliner &) const { assert(false); return const_cast<StructDecl *>(this); }
 inline Node *EnumDecl::Cp1(Inliner &) const { assert(false); return const_cast<EnumDecl *>(this); }
 inline Node *AliasDecl::Cp1(Inliner &) const { assert(false); return const_cast<AliasDecl *>(this); }
+inline Node *PropDecl::Cp1(Inliner &) const { assert(false); return const_cast<PropDecl *>(this); }
 
 // ---------------------------------------------------------------------------
 // Opt: fold, propagate, and inline below each node, one override per node
@@ -1489,5 +1490,6 @@ inline Node *FunVal::Opt(Optimizer &) { assert(false); return this; }
 inline Node *StructDecl::Opt(Optimizer &) { assert(false); return this; }
 inline Node *EnumDecl::Opt(Optimizer &) { assert(false); return this; }
 inline Node *AliasDecl::Opt(Optimizer &) { assert(false); return this; }
+inline Node *PropDecl::Opt(Optimizer &) { assert(false); return this; }
 
 }  // namespace goose

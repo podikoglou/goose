@@ -1792,7 +1792,7 @@ inline bool FoldingRanges(Workspace &ws, const Json &params, JsonOut &j) {
     };
     for (auto &s : f.spans)
         if (Is<Block>(s.node) || Is<MatchExpr>(s.node) || Is<StructLit>(s.node) || Is<FnDecl>(s.node) ||
-            Is<StructDecl>(s.node) || Is<EnumDecl>(s.node))
+            Is<StructDecl>(s.node) || Is<EnumDecl>(s.node) || Is<PropDecl>(s.node))
             extent(s.start, s.end);
     auto runstart = -1;
     for (auto l = 0; l <= t.Lines(); l++) {

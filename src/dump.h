@@ -431,7 +431,7 @@ inline void SelfRef::Dump(string &s, int) const { s += "self"; }
 
 inline void RangeExpr::Dump(string &s, int ind) const {
     DumpOperand(s, lo, ind);
-    s += "..";
+    s += inclusive ? "..=" : "..";
     DumpOperand(s, hi, ind);
 }
 
@@ -717,6 +717,45 @@ inline void AliasDecl::Dump(string &s, int) const {
     Append(s, "type ", al->qname, " = ");
     al->type->Dump(s);
     s += ";";
+}
+
+inline void PropDecl::Dump(string &s, int ind) const {
+    s += "prop";
+    if (!tag.empty()) {
+        s += " \"";
+        s += tag;
+        s += "\"";
+    }
+    if (!quantifiers.empty()) {
+        s += " for ";
+        for (size_t i = 0; i < quantifiers.size(); i++) {
+            if (i) s += ", ";
+            s += quantifiers[i].name;
+            if (quantifiers[i].type) {
+                s += ": ";
+                quantifiers[i].type->Dump(s);
+            }
+        }
+    }
+    if (!constraints.empty()) {
+        s += " where ";
+        for (size_t i = 0; i < constraints.size(); i++) {
+            if (i) s += ", ";
+            if (constraints[i]) constraints[i]->Dump(s, ind);
+        }
+    }
+    if (!configs.empty()) {
+        s += " with (";
+        for (size_t i = 0; i < configs.size(); i++) {
+            if (i) s += ", ";
+            s += configs[i].first;
+            s += " = ";
+            if (configs[i].second) configs[i].second->Dump(s, ind);
+        }
+        s += ")";
+    }
+    s += " ";
+    if (body) body->Dump(s, ind);
 }
 
 inline void Ast::Dump(string &s) const {

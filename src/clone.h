@@ -176,7 +176,7 @@ inline Node *AsCast::Clone1(Ast &ast) const {
 }
 
 inline Node *RangeExpr::Clone1(Ast &ast) const {
-    return ast.New<RangeExpr>(line, lo->Clone(ast), hi->Clone(ast));
+    return ast.New<RangeExpr>(line, lo->Clone(ast), hi->Clone(ast), inclusive);
 }
 
 inline Node *Block::Clone1(Ast &ast) const {
@@ -408,6 +408,19 @@ inline TypeExpr *Ast::CloneExpansionType(TypeExpr *t) {
 inline Node *StructDecl::Clone1(Ast &ast) const { return ast.New<StructDecl>(line, st); }
 inline Node *EnumDecl::Clone1(Ast &ast) const { return ast.New<EnumDecl>(line, en); }
 inline Node *AliasDecl::Clone1(Ast &ast) const { return ast.New<AliasDecl>(line, al); }
+inline Node *PropDecl::Clone1(Ast &ast) const {
+    auto p = ast.New<PropDecl>(line);
+    p->tag = tag;
+    p->quantifiers = quantifiers;
+    for (auto c : constraints) p->constraints.push_back(CloneOrNull(ast, c));
+    for (auto &cfg : configs) p->configs.push_back({ cfg.first, CloneOrNull(ast, cfg.second) });
+    p->body = (Block *)CloneOrNull(ast, (Node *)body);
+    p->target_fn = target_fn;
+    p->standalone = standalone;
+    p->ns = ns;
+    p->analysis = analysis;
+    return p;
+}
 
 // ---------------------------------------------------------------------------
 // Children: every direct child once, nulls skipped. A nested FnDecl's body is
@@ -442,6 +455,11 @@ inline void FnDecl::Children(const function<void(Node *)> &) const {}
 inline void StructDecl::Children(const function<void(Node *)> &) const {}
 inline void EnumDecl::Children(const function<void(Node *)> &) const {}
 inline void AliasDecl::Children(const function<void(Node *)> &) const {}
+inline void PropDecl::Children(const function<void(Node *)> &f) const {
+    for (auto c : constraints) CH(c);
+    for (auto &cfg : configs) CH(cfg.second);
+    CH(body);
+}
 
 inline void ArrayLit::Children(const function<void(Node *)> &f) const {
     for (auto e : elems) f(e);

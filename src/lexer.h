@@ -36,6 +36,7 @@ namespace goose {
     F(T_IMPORT,   "import")    F(T_NAMESPACE, "namespace") \
     F(T_STRUCT,   "struct")    F(T_ENUM,     "enum") \
     F(T_TYPE,     "type")      F(T_FN,       "fn")      F(T_THREADFN, "thread_fn") \
+    F(T_PROP,     "prop") \
     F(T_EXPORT,   "export")    F(T_SIMD,     "simd") \
     F(T_RECURSIVE, "recursive") F(T_LET,     "let")     F(T_VAR,    "var") \
     F(T_EXTERN,   "extern")    F(T_CONST,    "const") \
@@ -157,6 +158,10 @@ struct Lexer {
         }
         return copy.tok;
     }
+
+    // Contextual keywords in property blocks.
+    bool AtWhere() const { return tok == T_IDENT && attr == "where"; }
+    bool AtWith() const { return tok == T_IDENT && attr == "with"; }
 
     // An error on a line of the source, which its text echoes, with a caret
     // under the given position, else under the token's start where the line

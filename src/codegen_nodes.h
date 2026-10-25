@@ -396,6 +396,7 @@ inline string FnDecl::CgX(CodeGen &cg) { cg.Fail(line, "internal: FnDecl as valu
 inline string StructDecl::CgX(CodeGen &cg) { cg.Fail(line, "internal: decl as value"); }
 inline string EnumDecl::CgX(CodeGen &cg) { cg.Fail(line, "internal: decl as value"); }
 inline string AliasDecl::CgX(CodeGen &cg) { cg.Fail(line, "internal: decl as value"); }
+inline string PropDecl::CgX(CodeGen &cg) { cg.Fail(line, "internal: decl as value"); }
 
 // ---- CgAny ----------------------------------------------------------------
 
@@ -801,6 +802,7 @@ inline void FnDecl::CgAny(CodeGen &cg, const Dst &) { cg.GenStmt2(this); }
 inline void StructDecl::CgAny(CodeGen &cg, const Dst &) { cg.Fail(line, "internal: decl emitted"); }
 inline void EnumDecl::CgAny(CodeGen &cg, const Dst &) { cg.Fail(line, "internal: decl emitted"); }
 inline void AliasDecl::CgAny(CodeGen &cg, const Dst &) { cg.Fail(line, "internal: decl emitted"); }
+inline void PropDecl::CgAny(CodeGen &cg, const Dst &) { cg.Fail(line, "internal: decl emitted"); }
 
 // ---- CgStmt ---------------------------------------------------------------
 
@@ -1266,5 +1268,6 @@ inline void SelfRef::CgStmt(CodeGen &cg) { cg.Fail(line, "internal: self stateme
 inline void StructDecl::CgStmt(CodeGen &) {}
 inline void EnumDecl::CgStmt(CodeGen &) {}
 inline void AliasDecl::CgStmt(CodeGen &) {}
+inline void PropDecl::CgStmt(CodeGen &) {}
 
 }  // namespace goose

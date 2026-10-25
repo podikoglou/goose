@@ -114,6 +114,7 @@ struct Parser {
                 return next == T_IDENT || next == T_COLONCOLON;
             }
             case T_IMPORT: case T_NAMESPACE: case T_STRUCT: case T_ENUM: case T_TYPE:
+            case T_PROP:
                 return declaration;
             case T_IF: case T_MATCH: case T_LOOP: case T_WHILE: case T_FOR: case T_GUARD:
             case T_RETURN: case T_BREAK: case T_CONTINUE:
@@ -288,6 +289,43 @@ struct Parser {
                next == T_EXTERN || next == T_IDENT;
     }
 
+    bool AtWhere() const { return lex.AtWhere(); }
+    bool AtWith() const { return lex.AtWith(); }
+
+    bool AtFn() {
+        if (AtInline() || AtCheckfree() || AtFuzz()) return true;
+        switch (lex.tok) {
+            case T_RECURSIVE: case T_FN: case T_THREADFN: case T_EXPORT:
+            case T_SIMD:
+                return true;
+            case T_EXTERN: {
+                auto copy = lex;
+                try {
+                    copy.Next();
+                    if (copy.tok == T_STRLIT) copy.Next();
+                    return copy.tok != T_LCURLY;
+                } catch (CompileError &) {
+                    return false;
+                }
+            }
+            default:
+                return false;
+        }
+    }
+
+    FnDecl *ParseTopFnDecl() {
+        if (lex.tok == T_EXTERN) {
+            ExternPrefix pre { CurLine(), lex.doc, "", "" };
+            lex.Next();
+            if (lex.tok == T_STRLIT) {
+                pre.cname = lex.sval;
+                lex.Next();
+            }
+            return ParseFnDecl(false, &pre);
+        }
+        return ParseFnDecl(false);
+    }
+
     void Expect(TType t, const char *context) {
         if (lex.tok != t)
             Error(cat("expected \'", TName(t), "\' in ", context, ", found \'", TokStr(), "\'"));
@@ -406,8 +444,13 @@ struct Parser {
                 imp.line = line;
                 lex.Next();
                 imp.relative = IsNext(T_DOT);
-                imp.path = ExpectIdent("import");
-                while (IsNext(T_DOT)) Append(imp.path, "/", ExpectIdent("import"));
+                if (lex.tok == T_STRLIT) {
+                    imp.path = lex.sval;
+                    lex.Next();
+                } else {
+                    imp.path = ExpectIdent("import");
+                    while (IsNext(T_DOT)) Append(imp.path, "/", ExpectIdent("import"));
+                }
                 // `from` is an identifier here, as in `return x from f`.
                 if (lex.tok == T_IDENT && lex.attr == "from") {
                     if (imp.relative || imp.path.find('/') != string::npos)
@@ -475,6 +518,33 @@ struct Parser {
                 ast.topdecls.push_back(fd);
                 return;
             }
+            case T_PROP: {
+                vector<PropDecl *> pending_props;
+                while (lex.tok == T_PROP) {
+                    pending_props.push_back(ParsePropDecl());
+                }
+                if (AtFn()) {
+                    auto fd = ParseTopFnDecl();
+                    for (auto p : pending_props) {
+                        p->target_fn = fd->sf;
+                        p->ns = fd->sf->ns;
+                        fd->sf->props.push_back(p);
+                    }
+                    for (auto p : pending_props) {
+                        ast.topdecls.push_back(p);
+                    }
+                    ast.topdecls.push_back(fd);
+                } else {
+                    for (auto p : pending_props) {
+                        p->standalone = true;
+                        if (p->tag.empty() || p->quantifiers.empty()) {
+                            Error("standalone 'prop' must provide both an identifying string tag and an explicit 'for' clause");
+                        }
+                        ast.topdecls.push_back(p);
+                    }
+                }
+                return;
+            }
             case T_REUSABLE: case T_LET: case T_VAR: case T_CONST: {
                 auto vd = ParseVarDecl(true);
                 Expect(T_SEMI, "global declaration");
@@ -484,6 +554,99 @@ struct Parser {
             default:
                 Error(cat("top-level declaration expected, found \'", TokStr(), "\'"));
         }
+    }
+
+    Node *ParseConstraintExpr() {
+        auto sub = Sub(true);
+        if (lex.tok == T_LPAREN) {
+            auto save = lex;
+            try {
+                lex.Next();
+                auto e = ParseConstraintExpr();
+                if (lex.tok == T_RPAREN) {
+                    lex.Next();
+                    if (lex.tok == T_COMMA || AtWith() || lex.tok == T_LCURLY) {
+                        return e;
+                    }
+                }
+            } catch (CompileError &) {}
+            lex = save;
+        }
+        auto e = ParseExpr();
+        if (IsNext(T_IN)) {
+            auto in_line = CurLine();
+            auto lo = ParseExpr();
+            if (IsNext(T_DOTDOT)) {
+                bool inclusive = IsNext(T_ASSIGN);
+                auto hi = ParseExpr();
+                auto re = Finish(New<RangeExpr>(in_line, lo, hi, inclusive));
+                return Finish(New<Binary>(in_line, T_IN, e, re));
+            }
+            return Finish(New<Binary>(in_line, T_IN, e, lo));
+        }
+        return e;
+    }
+
+    PropDecl *ParsePropDecl() {
+        auto line = CurLine();
+        Expect(T_PROP, "property declaration");
+        auto p = New<PropDecl>(line);
+        p->ns = curns;
+
+        // Optional string literal tag
+        if (lex.tok == T_STRLIT) {
+            p->tag = ast.Intern(lex.sval);
+            lex.Next();
+        }
+
+        // Optional for clause
+        if (IsNext(T_FOR)) {
+            while (true) {
+                Param q;
+                if (IsNext(T_LPAREN)) {
+                    q.line = CurLine();
+                    q.name = ExpectIdent("property quantifier");
+                    if (IsNext(T_COLON)) q.type = ParseType();
+                    Expect(T_RPAREN, "property quantifier");
+                } else {
+                    q.line = CurLine();
+                    q.name = ExpectIdent("property quantifier");
+                    if (IsNext(T_COLON)) q.type = ParseType();
+                }
+                p->quantifiers.push_back(q);
+                if (!IsNext(T_COMMA)) break;
+                if (AtWhere() || AtWith() || lex.tok == T_LCURLY) break;
+            }
+        }
+
+        // Optional where clause
+        if (AtWhere()) {
+            lex.Next();
+            while (true) {
+                p->constraints.push_back(ParseConstraintExpr());
+                if (!IsNext(T_COMMA)) break;
+                if (AtWith() || lex.tok == T_LCURLY) break;
+            }
+        }
+
+        // Optional with clause
+        if (AtWith()) {
+            lex.Next();
+            Expect(T_LPAREN, "property with clause");
+            while (lex.tok != T_RPAREN && lex.tok != T_EOF) {
+                auto key = ExpectIdent("config key");
+                Expect(T_ASSIGN, "config assignment");
+                auto val = ParseExpr();
+                p->configs.push_back({ string(key), val });
+                if (!IsNext(T_COMMA)) break;
+            }
+            Expect(T_RPAREN, "property with clause");
+        }
+
+        // Predicate body block
+        p->body = ParseBlockExpr("property body");
+        ast.props.push_back(p);
+        return Finish(p);
     }
 
     void CheckFreshTypeName(string_view ns, string_view name) {
@@ -1884,6 +2047,10 @@ struct Parser {
     // One statement of b, or its tail; returns false once the block has
     // ended (its `}` consumed, by a guard's rest of the block included).
     bool ParseStatement(Block *b) {
+        if (lex.tok == T_PROP) {
+            Error("'prop' is only valid at the top level outside of functions; "
+                  "place properties directly above the function they specify");
+        }
         if (AtInline() || AtCheckfree() || AtFuzz()) goto nestedfndecl;
         switch (lex.tok) {
             case T_LET: case T_VAR: case T_CONST: case T_REUSABLE: {

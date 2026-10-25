@@ -15,6 +15,7 @@ struct SStruct;
 struct SEnum;
 struct SVariant;
 struct SAlias;
+struct PropDecl;
 struct Ast;
 struct VarDef;
 struct FnSpec;
@@ -832,6 +833,7 @@ enum NodeKind : uint8_t {
     NK_StructDecl,
     NK_EnumDecl,
     NK_AliasDecl,
+    NK_PropDecl,
 };
 
 struct Node {
@@ -1209,9 +1211,11 @@ NODE(SelfRef)                   // `self`: the value a literal is constructing (
     SelfRef(Line l) : Node(l, NKind) {}
 NODE_END
 
-NODE(RangeExpr)                 // Only inside for-headers.
+NODE(RangeExpr)                 // Inside for-headers and property constraints.
     Node *lo, *hi;
-    RangeExpr(Line l, Node *_lo, Node *_hi) : Node(l, NKind), lo(_lo), hi(_hi) {}
+    bool inclusive = false;
+    RangeExpr(Line l, Node *_lo, Node *_hi, bool _inclusive = false)
+        : Node(l, NKind), lo(_lo), hi(_hi), inclusive(_inclusive) {}
 NODE_END
 
 // A { stmt* expr? } sequence; tail is the value-producing trailing expression.
@@ -1483,6 +1487,7 @@ struct SFunction {
     // against (TypeCheck::ResolveCall).
     bool brokensig = false;
     vector<FnSpec *> specs;     // Specializations (typecheck), owned by Ast.
+    vector<PropDecl *> props;   // Declarative properties attached to this function.
 
     // Checked once per distinct argument types (§7.7): a function with type
     // parameters or an untyped parameter.
@@ -1606,6 +1611,44 @@ NODE_END
 NODE(AliasDecl)
     SAlias *al;
     AliasDecl(Line l, SAlias *_al) : Node(l, NKind), al(_al) {}
+NODE_END
+
+struct PropVarBound {
+    string_view name;
+    TypeExpr *type = nullptr;
+    bool is_slice = false;
+    TypeExpr *slice_elem_type = nullptr;
+    int tier = 1;                     // 1 = static interval, 2 = dependent, 3 = assume
+    bool has_low = false;
+    bool has_high = false;
+    int64_t low = 0;
+    int64_t high = 0;
+    string_view dep_var;              // Name of parent variable if Tier 2
+    int64_t dep_offset = 0;           // C in (dep_var + C)
+    bool is_len_bound = false;
+    int64_t min_len = 0;
+    int64_t max_len = 4096;
+};
+
+struct PropAnalysis {
+    vector<PropVarBound> vars;
+    vector<int> gen_order;            // Topological order to generate variables
+    vector<Node *> tier3_constraints; // Expressions for runtime d.assume(...)
+    int64_t max_len = 4096;
+    int64_t iterations = 1000;
+};
+
+NODE(PropDecl)
+    string_view tag;                      // Optional string literal name
+    vector<Param> quantifiers;            // Quantified variables from `for` (with name and optional type)
+    vector<Node *> constraints;           // Expressions from `where`
+    vector<pair<string, Node *>> configs; // Key-value options from `with(...)`
+    Block *body = nullptr;                // Predicate body block
+    SFunction *target_fn = nullptr;       // Associated function if adjacent
+    bool standalone = false;              // Standalone flag
+    string_view ns;                       // Namespace where declared
+    PropAnalysis analysis;                // Semantic & constraint analysis metadata
+    PropDecl(Line l) : Node(l, NKind) {}
 NODE_END
 
 #undef NODE
@@ -2463,6 +2506,7 @@ struct Ast {
     vector<SStruct *> structs;
     vector<SEnum *> enums;
     vector<SAlias *> aliases;
+    vector<PropDecl *> props;
     // The structs standing for the type names that name nothing
     // (SStruct::unknown), in no namespace and no declaration list.
     vector<SStruct *> unknowntypes;
@@ -2544,11 +2588,11 @@ struct Ast {
     // what a parse abandoned after it can be dropped again (DropSince).
     struct DeclMark {
         size_t types = 0, functions = 0, structs = 0, enums = 0, aliases = 0, globals = 0,
-               topdecls = 0;
+               topdecls = 0, props = 0;
     };
     DeclMark Mark() const {
         return { alltypes.size(), functions.size(), structs.size(), enums.size(), aliases.size(),
-                 globals.size(), topdecls.size() };
+                 globals.size(), topdecls.size(), props.size() };
     }
 
     // Deletes the types and declarations made since the mark: a parse the
@@ -2576,6 +2620,7 @@ struct Ast {
         }
         globals.resize(m.globals);
         topdecls.resize(m.topdecls);
+        props.resize(m.props);
     }
 
     // The same type with its contents read-only (§9.5): a fresh node, since
