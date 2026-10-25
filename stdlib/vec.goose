@@ -39,10 +39,34 @@ let int3_1 = int3 { 1, 1, 1 };
 let int4_0 = int4 { 0, 0, 0, 0 };
 let int4_1 = int4 { 1, 1, 1, 1 };
 
+prop "commutativity" for (ax: f64), (ay: f64), (bx: f64), (by: f64) where ax in -1000..=1000, ay in -1000..=1000, bx in -1000..=1000, by in -1000..=1000 {
+    let a = double2 { ax, ay };
+    let b = double2 { bx, by };
+    dot(a, b) == dot(b, a)
+}
+prop "distributivity" for (ax: f64), (ay: f64), (bx: f64), (by: f64), (cx: f64), (cy: f64) where ax in -100..=100, ay in -100..=100, bx in -100..=100, by in -100..=100, cx in -100..=100, cy in -100..=100 {
+    let a = double2 { ax, ay };
+    let b = double2 { bx, by };
+    let c = double2 { cx, cy };
+    let diff = dot(a, b + c) - (dot(a, b) + dot(a, c));
+    diff < 1e-6 && diff > -1e-6
+}
 fn dot<T>(a: vec2<T>, b: vec2<T>) -> T { a.x * b.x + a.y * b.y }
 fn dot<T>(a: vec3<T>, b: vec3<T>) -> T { a.x * b.x + a.y * b.y + a.z * b.z }
 fn dot<T>(a: vec4<T>, b: vec4<T>) -> T { a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w }
 
+prop "anti-commutativity" for (ax: f64), (ay: f64), (az: f64), (bx: f64), (by: f64), (bz: f64) where ax in -100..=100, ay in -100..=100, az in -100..=100, bx in -100..=100, by in -100..=100, bz in -100..=100 {
+    let a = double3 { ax, ay, az };
+    let b = double3 { bx, by, bz };
+    let c1 = cross(a, b);
+    let c2 = cross(b, a);
+    c1.x == -c2.x && c1.y == -c2.y && c1.z == -c2.z
+}
+prop "self cross is zero" for (ax: f64), (ay: f64), (az: f64) where ax in -1000..=1000, ay in -1000..=1000, az in -1000..=1000 {
+    let a = double3 { ax, ay, az };
+    let c = cross(a, a);
+    c.x == 0.0 && c.y == 0.0 && c.z == 0.0
+}
 fn cross<T>(a: vec3<T>, b: vec3<T>) -> vec3<T> {
     vec3<T> { a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x }
 }
@@ -56,10 +80,25 @@ fn length<T>(v: vec2<T>) -> T { sqrt(length_sq(v)) }
 fn length<T>(v: vec3<T>) -> T { sqrt(length_sq(v)) }
 fn length<T>(v: vec4<T>) -> T { sqrt(length_sq(v)) }
 
+prop "normalization length is 1" for (x: f64), (y: f64) where x in 1..=1000, y in 1..=1000 {
+    let v = double2 { x, y };
+    let n = normalize(v);
+    let diff = length(n) - 1.0;
+    diff < 1e-6 && diff > -1e-6
+}
 fn normalize<T>(v: vec2<T>) -> vec2<T> { v / length(v) }
 fn normalize<T>(v: vec3<T>) -> vec3<T> { v / length(v) }
 fn normalize<T>(v: vec4<T>) -> vec4<T> { v / length(v) }
 
+prop "symmetry" for (ax: f64), (ay: f64), (bx: f64), (by: f64) where ax in -1000..=1000, ay in -1000..=1000, bx in -1000..=1000, by in -1000..=1000 {
+    let a = double2 { ax, ay };
+    let b = double2 { bx, by };
+    distance(a, b) == distance(b, a)
+}
+prop "identity" for (x: f64), (y: f64) where x in -1000..=1000, y in -1000..=1000 {
+    let a = double2 { x, y };
+    distance(a, a) == 0.0
+}
 fn distance<T>(a: vec2<T>, b: vec2<T>) -> T { length(a - b) }
 fn distance<T>(a: vec3<T>, b: vec3<T>) -> T { length(a - b) }
 fn distance<T>(a: vec4<T>, b: vec4<T>) -> T { length(a - b) }
