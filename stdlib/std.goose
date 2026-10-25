@@ -9,6 +9,14 @@
 
 fn min<T>(a: T, b: T) -> T { if b < a { return b; } return a; }
 fn max<T>(a: T, b: T) -> T { if a < b { return b; } return a; }
+
+prop "boundedness" for (x: i64), (lo: i64), (hi: i64) where lo in -1000..=1000, hi in (lo + 1)..=2000 {
+    let c = clamp(x, lo, hi);
+    c >= lo && c <= hi
+}
+prop "identity" for (lo: i64), (hi: i64), (x: i64) where lo in -1000..=1000, hi in (lo + 1)..=2000, x in -1000..=2000, x >= lo, x <= hi {
+    clamp(x, lo, hi) == x
+}
 fn clamp<T>(x: T, lo: T, hi: T) -> T {
     if x < lo { return lo; }
     if hi < x { return hi; }
@@ -356,6 +364,17 @@ fn lower_bound<T, F>(xs: T[:]) -> i64 {
 }
 
 // xs sorted by <: the position of v (or where it would go), and whether it is there.
+prop "partition & match" for (data: const i64[:]), (target: i64) where data.len in 1..=128 {
+    var xs: i64[>..] = [];
+    xs.append(data);
+    sort(xs[..]);
+    let idx, ok = binary_search(xs[..], target);
+    if ok {
+        xs[idx] == target
+    } else {
+        (idx == 0 || xs[idx - 1] < target) && (idx == xs.len || xs[idx] > target)
+    }
+}
 fn binary_search<T>(xs: T[:], v: T) -> i64, bool {
     var lo = 0;
     var hi = xs.len;
@@ -387,8 +406,15 @@ fn rfind<T>(xs: T[:], sub: T[:]) -> i64 {
     return -1;
 }
 
+prop "prefix match" for (data: const u8[:]), (prefix_len: i64) where data.len in 1..=256, prefix_len in 0..=256, prefix_len <= data.len {
+    starts_with(data, data[..prefix_len])
+}
 fn starts_with<T>(xs: T[:], p: T[:]) -> bool { p.len <= xs.len && xs[..p.len] == p }
 fn starts_with<T>(xs: T[:], val: T) -> bool { xs.len > 0 && xs[0] == val }
+
+prop "suffix match" for (data: const u8[:]), (suffix_len: i64) where data.len in 1..=256, suffix_len in 0..=256, suffix_len <= data.len {
+    ends_with(data, data[data.len - suffix_len..])
+}
 fn ends_with<T>(xs: T[:], p: T[:]) -> bool { p.len <= xs.len && xs[xs.len - p.len..] == p }
 fn ends_with<T>(xs: T[:], val: T) -> bool { xs.len > 0 && xs[xs.len - 1] == val }
 
@@ -1143,6 +1169,11 @@ fn format_flt(out: u8[>..]&, v: f64, decimals: i64) {
 }
 
 // An optionally signed whole-string integer; false on anything else, including a value outside i64.
+prop "string to int roundtrip" for (x: i64) where x in -1000000000..=1000000000 {
+    let s = str(x);
+    let val, ok = parse_int(s);
+    ok && val == x
+}
 fn parse_int(s: u8[:], base: i64 = 10) -> i64, bool {
     var i = 0;
     var neg = false;
