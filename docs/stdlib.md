@@ -2426,8 +2426,23 @@ fn boolean(d: Driver&) -> bool
 // Slices, collections and strings
 fn gen_bytes(d: Driver&, min_len: i64, max_len: i64) -> u8[>..]
 fn gen_u8_array(d: Driver&, min_len: i64, max_len: i64) -> u8[>..]
+fn bytes(d: Driver&, min_len: i64, max_len: i64) -> u8[>..]
 fn gen_ascii_string(d: Driver&, min_len: i64, max_len: i64) -> u8[>..]
+fn gen_ascii_string(d: Driver&, len: i64) -> u8[>..]
+fn ascii(d: Driver&, min_len: i64, max_len: i64) -> u8[>..]
+fn ascii(d: Driver&, len: i64) -> u8[>..]
 fn gen_utf8_string(d: Driver&, min_len: i64, max_len: i64) -> u8[>..]
+fn gen_utf8_string(d: Driver&, max_len: i64) -> u8[>..]
+fn utf8(d: Driver&, min_len: i64, max_len: i64) -> u8[>..]
+fn utf8(d: Driver&, max_len: i64) -> u8[>..]
+fn gen_string_from(d: Driver&, charset: const u8[:], min_len: i64, max_len: i64) -> u8[>..]
+fn gen_string_from(d: Driver&, charset: const u8[:], len: i64) -> u8[>..]
+fn string_from(d: Driver&, charset: const u8[:], min_len: i64, max_len: i64) -> u8[>..]
+fn string_from(d: Driver&, charset: const u8[:], len: i64) -> u8[>..]
+fn gen_alphanumeric_string(d: Driver&, min_len: i64, max_len: i64) -> u8[>..]
+fn gen_alphanumeric_string(d: Driver&, len: i64) -> u8[>..]
+fn alphanumeric(d: Driver&, min_len: i64, max_len: i64) -> u8[>..]
+fn alphanumeric(d: Driver&, len: i64) -> u8[>..]
 fn gen_array<F>(d: Driver&, min_len: i64, max_len: i64)
 
 // Combinators
@@ -2442,7 +2457,16 @@ fn is_discarded(d: Driver&) -> bool
 ```
 
 UFCS applies directly to `Driver`: `d.gen_i64()`, `d.boolean()`, `d.next_u32()`, `d.int_range(0, 100)`,
-`d.ascii(1, 32)`, `d.utf8(0, 64)`, `d.assume(cond)`.
+`d.ascii(1, 32)`, `d.ascii(16)`, `d.utf8(64)`, `d.alphanumeric(8)`, `d.string_from("0123456789", 4)`, `d.assume(cond)`.
+
+### String and character strategies
+
+`Driver` provides rich strategies and convenient single-argument overloads for generating text, identifiers, and custom character set strings:
+
+- **`d.ascii(min_len, max_len)` / `d.ascii(len)`**: Generates printable ASCII strings (`[32..126]`). The single-argument form `d.ascii(len)` fixes the exact string length (shorthand for `d.ascii(len, len)`).
+- **`d.utf8(min_len, max_len)` / `d.utf8(max_len)`**: Generates valid multi-byte UTF-8 sequences. The single-argument form `d.utf8(max_len)` is shorthand for `d.utf8(0, max_len)`.
+- **`d.alphanumeric(min_len, max_len)` / `d.alphanumeric(len)`**: Generates strings composed of letters and digits (`[a-zA-Z0-9]`), ideal for identifiers, keys, and tokens.
+- **`d.string_from(charset, min_len, max_len)` / `d.string_from(charset, len)`**: Samples characters exclusively from the provided `charset` slice (e.g. hex `"0123456789abcdef"`, base64, DNA sequences, punctuation). Returns an empty string if `charset` is empty.
 
 ### Assumption filtering: `d.assume(cond)`
 

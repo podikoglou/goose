@@ -741,6 +741,63 @@ fn ::gen_ascii_string(d: Driver&, min_len: i64, max_len: i64) -> u8[>..] {
     res
 }
 
+fn ::gen_ascii_string(d: Driver&, len: i64) -> u8[>..] {
+    gen_ascii_string(d, len, len)
+}
+
+fn gen_ascii_string(d: Driver&, min_len: i64, max_len: i64) -> u8[>..] {
+    ::gen_ascii_string(d, min_len, max_len)
+}
+
+fn gen_ascii_string(d: Driver&, len: i64) -> u8[>..] {
+    ::gen_ascii_string(d, len)
+}
+
+fn ::gen_string_from(d: Driver&, charset: const u8[:], min_len: i64, max_len: i64) -> u8[>..] {
+    if charset.len == 0 {
+        var empty: u8[>..] = [];
+        return empty;
+    }
+    let len = gen_i64_range(d, min_len, max_len);
+    var res: u8[>..] = [];
+    if len <= 0 {
+        return res;
+    }
+    for _ in len {
+        let idx = gen_i64_range(d, 0, charset.len - 1);
+        res.push(charset[idx]);
+    }
+    res
+}
+
+fn ::gen_string_from(d: Driver&, charset: const u8[:], len: i64) -> u8[>..] {
+    gen_string_from(d, charset, len, len)
+}
+
+fn gen_string_from(d: Driver&, charset: const u8[:], min_len: i64, max_len: i64) -> u8[>..] {
+    ::gen_string_from(d, charset, min_len, max_len)
+}
+
+fn gen_string_from(d: Driver&, charset: const u8[:], len: i64) -> u8[>..] {
+    ::gen_string_from(d, charset, len)
+}
+
+fn ::gen_alphanumeric_string(d: Driver&, min_len: i64, max_len: i64) -> u8[>..] {
+    gen_string_from(d, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", min_len, max_len)
+}
+
+fn ::gen_alphanumeric_string(d: Driver&, len: i64) -> u8[>..] {
+    gen_alphanumeric_string(d, len, len)
+}
+
+fn gen_alphanumeric_string(d: Driver&, min_len: i64, max_len: i64) -> u8[>..] {
+    ::gen_alphanumeric_string(d, min_len, max_len)
+}
+
+fn gen_alphanumeric_string(d: Driver&, len: i64) -> u8[>..] {
+    ::gen_alphanumeric_string(d, len)
+}
+
 fn ::_encode_utf8_cp(out: u8[>..]&, cp: u32) {
     if cp <= 0x7F {
         out.push(cp as u8);
@@ -787,6 +844,18 @@ fn ::gen_utf8_string(d: Driver&, min_len: i64, max_len: i64) -> u8[>..] {
         }
     }
     res
+}
+
+fn ::gen_utf8_string(d: Driver&, max_len: i64) -> u8[>..] {
+    gen_utf8_string(d, 0, max_len)
+}
+
+fn gen_utf8_string(d: Driver&, min_len: i64, max_len: i64) -> u8[>..] {
+    ::gen_utf8_string(d, min_len, max_len)
+}
+
+fn gen_utf8_string(d: Driver&, max_len: i64) -> u8[>..] {
+    ::gen_utf8_string(d, max_len)
 }
 
 fn ::gen_array<F>(d: Driver&, min_len: i64, max_len: i64) {
@@ -888,14 +957,26 @@ fn gen_frequency(d: Driver&, weights: const i64[:]) -> i64 {
 // Clean alias methods for idiomatic UFCS:
 fn ::bytes(d: Driver&, min_len: i64, max_len: i64) -> u8[>..]  { gen_bytes(d, min_len, max_len) }
 fn ::ascii(d: Driver&, min_len: i64, max_len: i64) -> u8[>..]  { gen_ascii_string(d, min_len, max_len) }
+fn ::ascii(d: Driver&, len: i64) -> u8[>..]                    { gen_ascii_string(d, len, len) }
 fn ::utf8(d: Driver&, min_len: i64, max_len: i64) -> u8[>..]   { gen_utf8_string(d, min_len, max_len) }
+fn ::utf8(d: Driver&, max_len: i64) -> u8[>..]                 { gen_utf8_string(d, 0, max_len) }
+fn ::string_from(d: Driver&, charset: const u8[:], min_len: i64, max_len: i64) -> u8[>..] { gen_string_from(d, charset, min_len, max_len) }
+fn ::string_from(d: Driver&, charset: const u8[:], len: i64) -> u8[>..] { gen_string_from(d, charset, len, len) }
+fn ::alphanumeric(d: Driver&, min_len: i64, max_len: i64) -> u8[>..] { gen_alphanumeric_string(d, min_len, max_len) }
+fn ::alphanumeric(d: Driver&, len: i64) -> u8[>..]             { gen_alphanumeric_string(d, len, len) }
 fn ::array<F>(d: Driver&, min_len: i64, max_len: i64)          { gen_array(d, min_len, max_len, F) }
 fn ::variant(d: Driver&, num_variants: i64) -> i64             { gen_variant(d, num_variants) }
 fn ::one_of<T>(d: Driver&, choices: T[:]) -> T                 { gen_one_of(d, choices) }
 
 fn bytes(d: Driver&, min_len: i64, max_len: i64) -> u8[>..]    { ::bytes(d, min_len, max_len) }
 fn ascii(d: Driver&, min_len: i64, max_len: i64) -> u8[>..]    { ::ascii(d, min_len, max_len) }
+fn ascii(d: Driver&, len: i64) -> u8[>..]                      { ::ascii(d, len) }
 fn utf8(d: Driver&, min_len: i64, max_len: i64) -> u8[>..]     { ::utf8(d, min_len, max_len) }
+fn utf8(d: Driver&, max_len: i64) -> u8[>..]                   { ::utf8(d, max_len) }
+fn string_from(d: Driver&, charset: const u8[:], min_len: i64, max_len: i64) -> u8[>..] { ::string_from(d, charset, min_len, max_len) }
+fn string_from(d: Driver&, charset: const u8[:], len: i64) -> u8[>..] { ::string_from(d, charset, len) }
+fn alphanumeric(d: Driver&, min_len: i64, max_len: i64) -> u8[>..] { ::alphanumeric(d, min_len, max_len) }
+fn alphanumeric(d: Driver&, len: i64) -> u8[>..]               { ::alphanumeric(d, len) }
 fn variant(d: Driver&, num_variants: i64) -> i64               { ::variant(d, num_variants) }
 
 // ---- Universal Byte Shrinker -----------------------------------------------

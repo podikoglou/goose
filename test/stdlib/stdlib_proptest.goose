@@ -202,6 +202,125 @@ fn test_assume_filtering() {
     assert(res_filter.passed, "filter alias works as assume");
 }
 
+fn char_in_set(c: u8, set: const u8[:]) -> bool {
+    for s in set {
+        if c == s { return true; }
+    }
+    false
+}
+
+fn test_string_strategies() {
+    var d = driver(777, 5);
+
+    // 1. d.string_from(charset, min_len, max_len)
+    let hex_chars = "0123456789ABCDEF";
+    let s_hex = d.string_from(hex_chars, 8, 16);
+    assert(s_hex.len >= 8 && s_hex.len <= 16, "string_from len in range");
+    for c in s_hex {
+        assert(char_in_set(c, hex_chars), "string_from char in hex_chars");
+    }
+
+    // Empty charset returns empty string
+    let s_empty_charset = d.string_from("", 5, 10);
+    assert(s_empty_charset.len == 0, "empty charset returns []");
+
+    // 2. d.string_from(charset, len)
+    let s_exact = d.string_from("abc", 9);
+    assert(s_exact.len == 9, "string_from exact len matches");
+    for c in s_exact {
+        assert(char_in_set(c, "abc"), "string_from char in abc");
+    }
+
+    let s_exact_zero = d.string_from("abc", 0);
+    assert(s_exact_zero.len == 0, "string_from exact 0 len is empty");
+
+    let s_empty_charset_exact = d.string_from("", 10);
+    assert(s_empty_charset_exact.len == 0, "empty charset exact len returns []");
+
+    // 3. d.alphanumeric(min_len, max_len)
+    let s_alnum = d.alphanumeric(10, 25);
+    assert(s_alnum.len >= 10 && s_alnum.len <= 25, "alphanumeric len in range");
+    for c in s_alnum {
+        assert(is_alnum(c), "alphanumeric char valid");
+    }
+
+    // 4. d.alphanumeric(len)
+    let s_alnum_exact = d.alphanumeric(15);
+    assert(s_alnum_exact.len == 15, "alphanumeric exact len matches");
+    for c in s_alnum_exact {
+        assert(is_alnum(c), "alphanumeric exact char valid");
+    }
+
+    let s_alnum_zero = d.alphanumeric(0);
+    assert(s_alnum_zero.len == 0, "alphanumeric exact 0 len is empty");
+
+    // 5. d.ascii(len) single-argument overload
+    let s_ascii_exact = d.ascii(14);
+    assert(s_ascii_exact.len == 14, "ascii(len) matches exact length");
+    for c in s_ascii_exact {
+        assert(c >= 32 && c <= 126, "ascii(len) char in printable range");
+    }
+
+    let s_ascii_zero = d.ascii(0);
+    assert(s_ascii_zero.len == 0, "ascii(0) is empty");
+
+    // 6. d.utf8(max_len) single-argument overload
+    let s_utf8 = d.utf8(20);
+    assert(s_utf8.len >= 0 && s_utf8.len <= 20, "utf8(max_len) in bounds");
+
+    let s_utf8_zero = d.utf8(0);
+    assert(s_utf8_zero.len == 0, "utf8(0) is empty");
+
+    // Explicit namespaced and global calls:
+    let ns_str = proptest::string_from(d, "ABCD", 2, 4);
+    assert(ns_str.len >= 2 && ns_str.len <= 4, "proptest::string_from range valid");
+    let ns_str_exact = proptest::string_from(d, "ABCD", 3);
+    assert(ns_str_exact.len == 3, "proptest::string_from exact valid");
+
+    let ns_alnum = proptest::alphanumeric(d, 5, 10);
+    assert(ns_alnum.len >= 5 && ns_alnum.len <= 10, "proptest::alphanumeric range valid");
+    let ns_alnum_exact = proptest::alphanumeric(d, 4);
+    assert(ns_alnum_exact.len == 4, "proptest::alphanumeric exact valid");
+
+    let ns_ascii = proptest::ascii(d, 6);
+    assert(ns_ascii.len == 6, "proptest::ascii(len) valid");
+
+    let ns_utf8 = proptest::utf8(d, 12);
+    assert(ns_utf8.len >= 0 && ns_utf8.len <= 12, "proptest::utf8(max_len) valid");
+
+    // Also Driver gen_* equivalents
+    let g_str = d.gen_string_from("01", 3);
+    assert(g_str.len == 3, "d.gen_string_from exact valid");
+    let g_alnum = d.gen_alphanumeric_string(7);
+    assert(g_alnum.len == 7, "d.gen_alphanumeric_string exact valid");
+
+    // 7. Property-based testing verification across multiple iterations
+    check().iterations(200).for_each() { dr =>
+        let hex = dr.string_from("0123456789abcdef", 4, 12);
+        var hex_ok = hex.len >= 4 && hex.len <= 12;
+        for c in hex {
+            if !char_in_set(c, "0123456789abcdef") { hex_ok = false; break; }
+        }
+
+        let id = dr.alphanumeric(6, 18);
+        var id_ok = id.len >= 6 && id.len <= 18;
+        for c in id {
+            if !is_alnum(c) { id_ok = false; break; }
+        }
+
+        let fixed_ascii = dr.ascii(8);
+        var ascii_ok = fixed_ascii.len == 8;
+        for c in fixed_ascii {
+            if c < 32 || c > 126 { ascii_ok = false; break; }
+        }
+
+        let bounded_utf8 = dr.utf8(16);
+        let utf8_ok = bounded_utf8.len >= 0 && bounded_utf8.len <= 16;
+
+        hex_ok && id_ok && ascii_ok && utf8_ok
+    };
+}
+
 fn main() {
     test_driver_modes();
     test_generators();
@@ -209,5 +328,6 @@ fn main() {
     test_shrinking();
     test_doc_examples();
     test_assume_filtering();
+    test_string_strategies();
     print("proptest: all properties, generators, drivers and shrinking passed");
 }
