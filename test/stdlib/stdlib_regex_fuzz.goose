@@ -244,10 +244,7 @@ fn main() {
         .seed(0x1337cafe)
         .iterations(1000)
         .for_each() { d =>
-            var pattern: u8[>..] = [];
-            gen_regex(pattern, d, 0);
-            let text = gen_text(d);
-            check_regex_invariants(pattern[..], text[..])
+            fuzz_regex_invariants(d)
         };
     print("regex fuzz: all invariant, differential, and parser checks passed");
 }
