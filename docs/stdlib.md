@@ -2378,8 +2378,12 @@ A `Driver` provides deterministic entropy to property blocks and fuzz targets:
 either generated on the fly by an internal PRNG, or mapped from an input byte buffer
 during mutation fuzzing, shrinking, and replay.
 
+The API maintains a clear design distinction between raw entropy and smart generators:
+- **`d.gen_*()`**: smart generators equipped with boundary biasing (0, 1, -1, extremes, NaN, subnormals) designed specifically for testing invariants and edge-case behavior. For booleans, `d.boolean()` is provided as a clean, ergonomic alias for `d.gen_bool()`.
+- **`d.next_*()`**: low-level, uniform entropy reads from the PRNG or byte buffer without any boundary biasing.
+
 ```goose
-// Primitive generators (uniform entropy from PRNG or mutation stream)
+// Low-level entropy reads (uniform entropy from PRNG or mutation stream, without biasing)
 fn next_bool(d: Driver&) -> bool
 fn next_u8(d: Driver&) -> u8
 fn next_u16(d: Driver&) -> u16
@@ -2392,14 +2396,32 @@ fn next_i64(d: Driver&) -> i64
 fn next_f32(d: Driver&) -> f32
 fn next_f64(d: Driver&) -> f64
 
-// Range and structured generators (with boundary edge-case biasing)
+// Smart primitive and range generators (with boundary edge-case biasing)
+fn gen_u8(d: Driver&) -> u8
+fn gen_u8(d: Driver&, min: u8, max: u8) -> u8
+fn gen_i8(d: Driver&) -> i8
+fn gen_i8(d: Driver&, min: i8, max: i8) -> i8
+fn gen_u16(d: Driver&) -> u16
+fn gen_u16(d: Driver&, min: u16, max: u16) -> u16
+fn gen_i16(d: Driver&) -> i16
+fn gen_i16(d: Driver&, min: i16, max: i16) -> i16
+fn gen_u32(d: Driver&) -> u32
+fn gen_u32(d: Driver&, min: u32, max: u32) -> u32
+fn gen_i32(d: Driver&) -> i32
+fn gen_i32(d: Driver&, min: i32, max: i32) -> i32
+fn gen_u64(d: Driver&) -> u64
+fn gen_u64(d: Driver&, min: u64, max: u64) -> u64
 fn gen_i64(d: Driver&) -> i64
 fn gen_i64(d: Driver&, min: i64, max: i64) -> i64
 fn gen_i64_range(d: Driver&, min: i64, max: i64) -> i64
 fn int_range(d: Driver&, min: i64, max: i64) -> i64
+fn gen_f32(d: Driver&) -> f32
+fn gen_f32(d: Driver&, min: f32, max: f32) -> f32
 fn gen_f64(d: Driver&) -> f64
+fn gen_f64(d: Driver&, min: f64, max: f64) -> f64
 fn gen_f64_range(d: Driver&, min: f64, max: f64) -> f64
 fn gen_bool(d: Driver&) -> bool
+fn boolean(d: Driver&) -> bool
 
 // Slices, collections and strings
 fn gen_bytes(d: Driver&, min_len: i64, max_len: i64) -> u8[>..]
@@ -2419,7 +2441,7 @@ fn filter(d: Driver&, cond: bool) -> bool
 fn is_discarded(d: Driver&) -> bool
 ```
 
-UFCS applies directly to `Driver`: `d.next_u32()`, `d.int_range(0, 100)`,
+UFCS applies directly to `Driver`: `d.gen_i64()`, `d.boolean()`, `d.next_u32()`, `d.int_range(0, 100)`,
 `d.ascii(1, 32)`, `d.utf8(0, 64)`, `d.assume(cond)`.
 
 ### Assumption filtering: `d.assume(cond)`
@@ -2454,7 +2476,7 @@ fn test_player() {
     check().for_each() { d =>
         let name = d.ascii(1, 16);
         let score = d.int_range(0, 1000);
-        let active = d.next_bool();
+        let active = d.boolean();
         name.len >= 1 && score >= 0
     };
 }

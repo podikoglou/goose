@@ -40,14 +40,26 @@ fn test_generators() {
     let i = d.gen_i64_range(-50, 50);
     assert(i >= -50 && i <= 50, "i64 in range");
 
+    let gi = d.gen_i64();
+    assert(gi >= -9223372036854775807 - 1 && gi <= 9223372036854775807, "gen_i64 valid");
+
     let u = d.gen_u64_range(100, 200);
     assert(u >= 100 && u <= 200, "u64 in range");
+
+    let gu = d.gen_u64();
+    assert(gu >= 0, "gen_u64 valid");
 
     let flt = d.gen_f64_range(1.5, 9.5);
     assert(flt >= 1.5 && flt <= 9.5, "f64 in range");
 
+    let gf = d.gen_f64();
+    assert(gf == gf || gf != gf, "gen_f64 produces valid f64 (including nan)");
+
     let b = d.gen_bool();
-    assert(b == true || b == false, "bool valid");
+    assert(b == true || b == false, "gen_bool valid");
+
+    let b_alias = d.boolean();
+    assert(b_alias == true || b_alias == false, "boolean alias valid");
 
     let s = d.gen_ascii_string(5, 10);
     assert(s.len >= 5 && s.len <= 10, "string len in range");
@@ -140,7 +152,7 @@ fn test_doc_examples() {
     check().iterations(500).for_each() { d =>
         let name = d.ascii(1, 16);
         let score = d.int_range(0, 1000);
-        let active = d.next_bool();
+        let active = d.boolean();
         name.len >= 1 && score >= 0 && (active || !active)
     };
 }

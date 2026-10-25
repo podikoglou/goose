@@ -470,6 +470,9 @@ fn ::gen_u64(d: Driver&) -> u64 {
 fn ::gen_u64(d: Driver&, min: u64, max: u64) -> u64 {
     gen_u64_range(d, min, max)
 }
+fn gen_u64_range(d: Driver&, min: u64, max: u64) -> u64 { ::gen_u64_range(d, min, max) }
+fn gen_u64(d: Driver&) -> u64 { ::gen_u64(d) }
+fn gen_u64(d: Driver&, min: u64, max: u64) -> u64 { ::gen_u64(d, min, max) }
 
 fn ::gen_i64_range(d: Driver&, min: i64, max: i64) -> i64 {
     var lo = min;
@@ -507,42 +510,63 @@ fn ::gen_i64(d: Driver&) -> i64 {
 fn ::gen_i64(d: Driver&, min: i64, max: i64) -> i64 {
     gen_i64_range(d, min, max)
 }
+fn gen_i64_range(d: Driver&, min: i64, max: i64) -> i64 { ::gen_i64_range(d, min, max) }
+fn gen_i64(d: Driver&) -> i64 { ::gen_i64(d) }
+fn gen_i64(d: Driver&, min: i64, max: i64) -> i64 { ::gen_i64(d, min, max) }
 
 fn ::gen_u32_range(d: Driver&, min: u32, max: u32) -> u32 {
     gen_u64_range(d, min, max) as u32
 }
-fn ::gen_u32(d: Driver&) -> u32 { next_u32(d) }
+fn ::gen_u32(d: Driver&) -> u32 { gen_u32_range(d, 0, 0xFFFFFFFF) }
 fn ::gen_u32(d: Driver&, min: u32, max: u32) -> u32 { gen_u32_range(d, min, max) }
+fn gen_u32_range(d: Driver&, min: u32, max: u32) -> u32 { ::gen_u32_range(d, min, max) }
+fn gen_u32(d: Driver&) -> u32 { ::gen_u32(d) }
+fn gen_u32(d: Driver&, min: u32, max: u32) -> u32 { ::gen_u32(d, min, max) }
 
 fn ::gen_i32_range(d: Driver&, min: i32, max: i32) -> i32 {
     gen_i64_range(d, min, max) as! i32
 }
-fn ::gen_i32(d: Driver&) -> i32 { next_u32(d) as! i32 }
+fn ::gen_i32(d: Driver&) -> i32 { gen_i32_range(d, -2147483648, 2147483647) }
 fn ::gen_i32(d: Driver&, min: i32, max: i32) -> i32 { gen_i32_range(d, min, max) }
+fn gen_i32_range(d: Driver&, min: i32, max: i32) -> i32 { ::gen_i32_range(d, min, max) }
+fn gen_i32(d: Driver&) -> i32 { ::gen_i32(d) }
+fn gen_i32(d: Driver&, min: i32, max: i32) -> i32 { ::gen_i32(d, min, max) }
 
 fn ::gen_u16_range(d: Driver&, min: u16, max: u16) -> u16 {
     gen_u64_range(d, min, max) as u16
 }
-fn ::gen_u16(d: Driver&) -> u16 { next_u16(d) }
+fn ::gen_u16(d: Driver&) -> u16 { gen_u16_range(d, 0, 65535) }
 fn ::gen_u16(d: Driver&, min: u16, max: u16) -> u16 { gen_u16_range(d, min, max) }
+fn gen_u16_range(d: Driver&, min: u16, max: u16) -> u16 { ::gen_u16_range(d, min, max) }
+fn gen_u16(d: Driver&) -> u16 { ::gen_u16(d) }
+fn gen_u16(d: Driver&, min: u16, max: u16) -> u16 { ::gen_u16(d, min, max) }
 
 fn ::gen_i16_range(d: Driver&, min: i16, max: i16) -> i16 {
     gen_i64_range(d, min, max) as! i16
 }
-fn ::gen_i16(d: Driver&) -> i16 { next_u16(d) as! i16 }
+fn ::gen_i16(d: Driver&) -> i16 { gen_i16_range(d, -32768, 32767) }
 fn ::gen_i16(d: Driver&, min: i16, max: i16) -> i16 { gen_i16_range(d, min, max) }
+fn gen_i16_range(d: Driver&, min: i16, max: i16) -> i16 { ::gen_i16_range(d, min, max) }
+fn gen_i16(d: Driver&) -> i16 { ::gen_i16(d) }
+fn gen_i16(d: Driver&, min: i16, max: i16) -> i16 { ::gen_i16(d, min, max) }
 
 fn ::gen_u8_range(d: Driver&, min: u8, max: u8) -> u8 {
     gen_u64_range(d, min, max) as u8
 }
-fn ::gen_u8(d: Driver&) -> u8 { next_u8(d) }
+fn ::gen_u8(d: Driver&) -> u8 { gen_u8_range(d, 0, 255) }
 fn ::gen_u8(d: Driver&, min: u8, max: u8) -> u8 { gen_u8_range(d, min, max) }
+fn gen_u8_range(d: Driver&, min: u8, max: u8) -> u8 { ::gen_u8_range(d, min, max) }
+fn gen_u8(d: Driver&) -> u8 { ::gen_u8(d) }
+fn gen_u8(d: Driver&, min: u8, max: u8) -> u8 { ::gen_u8(d, min, max) }
 
 fn ::gen_i8_range(d: Driver&, min: i8, max: i8) -> i8 {
     gen_i64_range(d, min, max) as! i8
 }
-fn ::gen_i8(d: Driver&) -> i8 { next_u8(d) as! i8 }
+fn ::gen_i8(d: Driver&) -> i8 { gen_i8_range(d, -128, 127) }
 fn ::gen_i8(d: Driver&, min: i8, max: i8) -> i8 { gen_i8_range(d, min, max) }
+fn gen_i8_range(d: Driver&, min: i8, max: i8) -> i8 { ::gen_i8_range(d, min, max) }
+fn gen_i8(d: Driver&) -> i8 { ::gen_i8(d) }
+fn gen_i8(d: Driver&, min: i8, max: i8) -> i8 { ::gen_i8(d, min, max) }
 
 fn ::gen_f64_range(d: Driver&, min: f64, max: f64) -> f64 {
     var lo = min;
@@ -589,6 +613,9 @@ fn ::gen_f64(d: Driver&) -> f64 {
 fn ::gen_f64(d: Driver&, min: f64, max: f64) -> f64 {
     gen_f64_range(d, min, max)
 }
+fn gen_f64_range(d: Driver&, min: f64, max: f64) -> f64 { ::gen_f64_range(d, min, max) }
+fn gen_f64(d: Driver&) -> f64 { ::gen_f64(d) }
+fn gen_f64(d: Driver&, min: f64, max: f64) -> f64 { ::gen_f64(d, min, max) }
 
 fn ::gen_f32_range(d: Driver&, min: f32, max: f32) -> f32 {
     var lo = min;
@@ -635,13 +662,18 @@ fn ::gen_f32(d: Driver&) -> f32 {
 fn ::gen_f32(d: Driver&, min: f32, max: f32) -> f32 {
     gen_f32_range(d, min, max)
 }
+fn gen_f32_range(d: Driver&, min: f32, max: f32) -> f32 { ::gen_f32_range(d, min, max) }
+fn gen_f32(d: Driver&) -> f32 { ::gen_f32(d) }
+fn gen_f32(d: Driver&, min: f32, max: f32) -> f32 { ::gen_f32(d, min, max) }
 
 fn ::next_f32(d: Driver&) -> f32 {
-    gen_f32(d)
+    let t = (next_u32(d) >> 8) as f32 / 16777216.0;
+    (t * 200000.0) - 100000.0
 }
 
 fn ::next_f64(d: Driver&) -> f64 {
-    gen_f64(d)
+    let t = (next_u64(d) >> 11) as f64 / 9007199254740992.0;
+    (t * 2000000.0) - 1000000.0
 }
 
 fn next_f32(d: Driver&) -> f32 { ::next_f32(d) }
@@ -659,6 +691,11 @@ fn ::gen_bool_prob(d: Driver&, p: f64) -> bool {
     let threshold = (p * 4294967296.0) as u64;
     next_u32(d) < threshold
 }
+
+fn gen_bool_prob(d: Driver&, p: f64) -> bool { ::gen_bool_prob(d, p) }
+
+fn ::boolean(d: Driver&) -> bool { gen_bool(d) }
+fn boolean(d: Driver&) -> bool { ::boolean(d) }
 
 fn ::gen_bytes(d: Driver&, min_len: i64, max_len: i64) -> u8[>..] {
     let len = gen_i64_range(d, min_len, max_len);
