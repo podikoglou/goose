@@ -112,6 +112,19 @@ fn contains<K, V>(d: dictionary<K, V>&, key: K) -> bool { dict_probe(d, key) >= 
 // Sets key to val; true if the key was new. Like get_or_insert and update,
 // it makes room for the key before the one walk that finds it or the unused
 // slot where it goes.
+prop "insert-get roundtrip" for (k: i64), (v: i64) {
+    var d = dictionary<i64, i64> {};
+    insert(d, k, v);
+    let p = get(d, k);
+    p != null && p == v && contains(d, k) && d.count == 1
+}
+prop "value overwrite" for (k: i64), (v1: i64), (v2: i64) {
+    var d = dictionary<i64, i64> {};
+    insert(d, k, v1);
+    let is_new = insert(d, k, v2);
+    let p = get(d, k);
+    !is_new && p != null && p == v2 && d.count == 1
+}
 fn insert<K, V>(d: dictionary<K, V>&, key: K, val: V) -> bool {
     dict_room(d);
     let h = hash(key);
@@ -152,6 +165,16 @@ fn update<K, V, F>(d: dictionary<K, V>&, key: K, v0: V) {
 }
 
 // Removes key; true if it was there.
+prop "insertion followed by removal" for (k: i64), (v: i64) {
+    var d = dictionary<i64, i64> {};
+    insert(d, k, v);
+    let removed = remove(d, k);
+    removed && !contains(d, k) && get(d, k) == null && d.count == 0
+}
+prop "non-existent key removal" for (k: i64) {
+    var d = dictionary<i64, i64> {};
+    !remove(d, k) && d.count == 0
+}
 fn remove<K, V>(d: dictionary<K, V>&, key: K) -> bool {
     var i = dict_probe(d, key);
     if i < 0 { return false; }
@@ -175,6 +198,13 @@ fn remove<K, V>(d: dictionary<K, V>&, key: K) -> bool {
     return true;
 }
 
+prop "clear empties dictionary" for (k1: i64), (v1: i64), (k2: i64), (v2: i64) {
+    var d = dictionary<i64, i64> {};
+    insert(d, k1, v1);
+    insert(d, k2, v2);
+    clear(d);
+    d.count == 0 && !contains(d, k1) && !contains(d, k2)
+}
 fn clear<K, V>(d: dictionary<K, V>&) {
     for &s in d.slots { s.tag = 0; }
     d.count = 0;
