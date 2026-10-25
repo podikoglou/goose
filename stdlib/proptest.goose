@@ -2450,18 +2450,18 @@ fn ::for_each<F>(c: Config) {
             // CLI fuzz/test target: users never see check().for_each(); give them the goose test/fuzz command.
             if res.saved_crash_file.len > 0 {
                 print("  ", cmd_verb, c.opt_fuzz_source_file,
-                      " --target ", c.opt_fuzz_target_name,
+                      " --target \"", c.opt_fuzz_target_name, "\"",
                       " --replay ", res.saved_crash_file);
                 if res.shrunk_bytes_len > 0 {
                     print("  (or paste the hex above into --replay)");
                 }
             } else if res.shrunk_bytes_len > 0 {
                 print("  ", cmd_verb, c.opt_fuzz_source_file,
-                      " --target ", c.opt_fuzz_target_name,
+                      " --target \"", c.opt_fuzz_target_name, "\"",
                       " --replay \"<hex-from-above>\"");
             } else if res.failed_seed != 0 {
                 print("  ", cmd_verb, c.opt_fuzz_source_file,
-                      " --target ", c.opt_fuzz_target_name,
+                      " --target \"", c.opt_fuzz_target_name, "\"",
                       " --seed ", res.failed_seed);
             }
         } else {
@@ -2561,18 +2561,18 @@ fn ::for_each_contained<W>(c: Config) {
             // CLI fuzz/test target: users never see run_contained; give them the goose test/fuzz command.
             if res.saved_crash_file.len > 0 {
                 print("  ", cmd_verb, c.opt_fuzz_source_file,
-                      " --target ", c.opt_fuzz_target_name,
+                      " --target \"", c.opt_fuzz_target_name, "\"",
                       " --replay ", res.saved_crash_file);
                 if res.shrunk_bytes_len > 0 {
                     print("  (or paste the hex above into --replay)");
                 }
             } else if res.shrunk_bytes_len > 0 {
                 print("  ", cmd_verb, c.opt_fuzz_source_file,
-                      " --target ", c.opt_fuzz_target_name,
+                      " --target \"", c.opt_fuzz_target_name, "\"",
                       " --replay \"<hex-from-above>\"");
             } else if res.failed_seed != 0 {
                 print("  ", cmd_verb, c.opt_fuzz_source_file,
-                      " --target ", c.opt_fuzz_target_name,
+                      " --target \"", c.opt_fuzz_target_name, "\"",
                       " --seed ", res.failed_seed);
             }
         } else {

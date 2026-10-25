@@ -1231,10 +1231,22 @@ int Main(int argc, char **argv) {
         else if (arg == "--dump-docs") dumpdocs = true;
         else if (arg == "--dump-prop-harness") dump_prop_harness = true;
         else if (arg == "--list-prop-targets") list_prop_targets = true;
-        else if (arg == "--prop-target" && i + 1 < argc) prop_target = argv[++i];
-        else if (arg == "--target" && i + 1 < argc) {
-            fuzz_target = argv[++i];
-            if (prop_target.empty()) prop_target = fuzz_target;
+        else if ((arg == "--target" || arg == "--prop-target") && i + 1 < argc) {
+            string t = argv[++i];
+            while (i + 1 < argc && argv[i + 1][0] != '-') {
+                string next = argv[i + 1];
+                if (files.empty() && ((next.size() >= 6 && next.compare(next.size() - 6, 6, ".goose") == 0) || FileExists(next))) {
+                    break;
+                }
+                t += " ";
+                t += argv[++i];
+            }
+            if (arg == "--prop-target") {
+                prop_target = t;
+            } else {
+                fuzz_target = t;
+                if (prop_target.empty()) prop_target = fuzz_target;
+            }
         }
         else if (arg == "--list-targets") {
             fuzz_list_targets = true;

@@ -120,6 +120,13 @@ def check_prop_cli(exe, base_dir=None):
         assert "[PASS] fib::strictly monotonic" in res_target.stdout, "must report PASS for strictly monotonic"
         assert "[PASS] fib\n" not in res_target.stdout, "must not run other properties"
 
+        # 5b. Run unquoted multi-word target with --target
+        res_unquoted = subprocess.run([str(exe), "test", str(pass_path), "--target", "fib::strictly", "monotonic"],
+                                      capture_output=True, text=True, cwd=root)
+        if res_unquoted.returncode != 0:
+            raise RuntimeError(f"unquoted multi-word target failed:\n{res_unquoted.stderr}\n{res_unquoted.stdout}")
+        assert "[PASS] fib::strictly monotonic" in res_unquoted.stdout, "must run strictly monotonic target with unquoted words"
+
         # 6. Non-existent target
         res_nonexistent = subprocess.run([str(exe), "test", str(pass_path), "--target", "missing_target"],
                                          capture_output=True, text=True, cwd=root)
@@ -138,6 +145,7 @@ def check_prop_cli(exe, base_dir=None):
         assert "Target: fib::overflow failure" in res_fail.stdout, "must print target name"
         assert "Minimal failing bytes (hex):" in res_fail.stdout, "must print minimal bytes"
         assert "goose test" in res_fail.stdout, "reproduction command must recommend goose test"
+        assert '--target "fib::overflow failure"' in res_fail.stdout, "reproduction command must quote target name"
 
         # Extract replay hex and seed
         seed_match = re.search(r"base seed:\s*(\d+)", res_fail.stdout)
