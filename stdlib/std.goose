@@ -66,7 +66,14 @@ fn next_pow2(x: i64) -> i64 {
 
 // The bits set, and the leading / trailing zero bits, 64 for zero: the
 // runtime's (src/runtime/runtime_ext.h), one instruction where it can.
+prop "complement sum" for (x: u64) {
+    popcount(x) + popcount(~x) == 64
+}
 extern fn popcount(x: u64) -> i64 = "gs_popcount";
+
+prop "sum bound" for (x: u64) where x in 1..=0x7fffffffffffffff {
+    clz(x) + ctz(x) <= 64
+}
 extern fn clz(x: u64) -> i64 = "gs_clz";
 extern fn ctz(x: u64) -> i64 = "gs_ctz";
 
@@ -517,6 +524,13 @@ fn copy_into<T>(dst: T[:], src: T[:]) {
     for i in dst.len { dst[i] .= src[i]; }
 }
 
+prop "involution" for (data: const i64[:]) where data.len in 0..=512 {
+    var xs: i64[>..] = [];
+    xs.append(data);
+    reverse(xs[..]);
+    reverse(xs[..]);
+    xs[..] == data
+}
 fn reverse<T>(xs: T[:]) {
     var i = 0;
     var j = xs.len - 1;
@@ -654,6 +668,35 @@ fn sort_heap<T, F>(v: T[:]) {
 // bounds the worst case at O(n log n). Ranges of 10 or fewer are insertion
 // sorted: its mispredicted loop exits make it slower than partitioning
 // above that.
+prop "idempotence" for (data: const i64[:]) where data.len in 0..=256 {
+    var xs: i64[>..] = [];
+    xs.append(data);
+    sort(xs[..]);
+    let once = copy(xs);
+    sort(xs[..]);
+    xs[..] == once[..]
+}
+prop "preserves length" for (data: const i64[:]) where data.len in 0..=256 {
+    var xs: i64[>..] = [];
+    xs.append(data);
+    sort(xs[..]);
+    xs.len == data.len
+}
+prop "ordering" for (data: const i64[:]) where data.len in 0..=256 {
+    var xs: i64[>..] = [];
+    xs.append(data);
+    sort(xs[..]);
+    var sorted = true;
+    var i = 1;
+    while i < xs.len {
+        if xs[i - 1] > xs[i] {
+            sorted = false;
+            break;
+        }
+        i += 1;
+    }
+    sorted
+}
 fn sort<T>(xs: T[:]) { sort(xs) { a, b => a < b } }
 fn sort<T, F>(xs: T[:]) {
     let n = xs.len;
