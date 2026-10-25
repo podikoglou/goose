@@ -163,8 +163,8 @@ struct Driver {
     buf:            const u8[:],
     has_buf:        bool,
     cursor:         i64,
-    depth:          i32,
-    max_depth:      i32,
+    curr_depth:     i32,
+    depth_limit:    i32,
     iteration_seed: u64,
     record_mode:    bool,
     exhausted:      bool,
@@ -182,8 +182,8 @@ fn driver(iteration_seed: u64 = 0, max_depth: i32 = 5) -> Driver {
         buf:            ""[..0],
         has_buf:        false,
         cursor:         0,
-        depth:          0,
-        max_depth:      max_depth,
+        curr_depth:     0,
+        depth_limit:    max_depth,
         iteration_seed: s,
         record_mode:    false,
         exhausted:      false,
@@ -203,8 +203,8 @@ fn recording_driver(iteration_seed: u64 = 0, max_depth: i32 = 5) -> Driver {
         buf:            ""[..0],
         has_buf:        false,
         cursor:         0,
-        depth:          0,
-        max_depth:      max_depth,
+        curr_depth:     0,
+        depth_limit:    max_depth,
         iteration_seed: s,
         record_mode:    true,
         exhausted:      false,
@@ -223,8 +223,8 @@ fn driver_from_bytes(bytes: const u8[:], max_depth: i32 = 5) -> Driver {
         buf:            bytes,
         has_buf:        true,
         cursor:         0,
-        depth:          0,
-        max_depth:      max_depth,
+        curr_depth:     0,
+        depth_limit:    max_depth,
         iteration_seed: 0,
         record_mode:    false,
         exhausted:      false,
@@ -412,14 +412,51 @@ fn next_i16(d: Driver&) -> i16   { ::next_i16(d) }
 fn next_i32(d: Driver&) -> i32   { ::next_i32(d) }
 fn next_i64(d: Driver&) -> i64   { ::next_i64(d) }
 
+fn ::can_recurse(d: Driver&) -> bool {
+    d.curr_depth < d.depth_limit
+}
+fn can_recurse(d: Driver&) -> bool {
+    ::can_recurse(d)
+}
+
+fn ::depth(d: Driver&) -> i32 {
+    d.curr_depth
+}
+fn depth(d: Driver&) -> i32 {
+    ::depth(d)
+}
+
+fn ::max_depth(d: Driver&) -> i32 {
+    d.depth_limit
+}
+fn max_depth(d: Driver&) -> i32 {
+    ::max_depth(d)
+}
+
 fn ::enter_depth(d: Driver&) -> bool {
-    if d.depth >= d.max_depth { return false; }
-    d.depth += 1;
+    if d.curr_depth >= d.depth_limit { return false; }
+    d.curr_depth += 1;
     true
+}
+fn enter_depth(d: Driver&) -> bool {
+    ::enter_depth(d)
 }
 
 fn ::leave_depth(d: Driver&) {
-    if d.depth > 0 { d.depth -= 1; }
+    if d.curr_depth > 0 { d.curr_depth -= 1; }
+}
+fn leave_depth(d: Driver&) {
+    ::leave_depth(d)
+}
+
+fn ::recurse<F>(d: Driver&) -> bool {
+    if !enter_depth(d) { return false; }
+    F(&d);
+    leave_depth(d);
+    return true;
+}
+fn recurse<F>(d: Driver&) -> bool {
+    ::recurse(d, F)
 }
 
 struct Recording {
@@ -869,12 +906,12 @@ fn ::gen_array<F>(d: Driver&, min_len: i64, max_len: i64) {
 
 fn ::gen_variant(d: Driver&, num_variants: i64) -> i64 {
     if num_variants <= 1 { return 0; }
-    if !enter_depth(d) { return 0; }
-    let v = gen_i64_range(d, 0, num_variants - 1);
-    if v == 0 {
-        leave_depth(d);
-    }
-    v
+    if !can_recurse(d) { return 0; }
+    gen_i64_range(d, 0, num_variants - 1)
+}
+
+fn gen_variant(d: Driver&, num_variants: i64) -> i64 {
+    ::gen_variant(d, num_variants)
 }
 
 fn ::gen_one_of<T>(d: Driver&, choices: T[:]) -> T {

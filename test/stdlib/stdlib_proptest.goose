@@ -321,6 +321,128 @@ fn test_string_strategies() {
     };
 }
 
+fn test_depth_guard() {
+    // 1. Basic driver queries and lifecycle
+    var d = driver(12345, 3);
+    assert(d.depth() == 0, "initial depth is 0");
+    assert(d.max_depth() == 3, "max_depth matches configuration");
+    assert(d.can_recurse(), "can recurse initially");
+
+    // Root/namespaced mirror queries
+    assert(depth(d) == 0, "global depth() matches");
+    assert(max_depth(d) == 3, "global max_depth() matches");
+    assert(can_recurse(d), "global can_recurse() matches");
+    assert(proptest::depth(d) == 0, "proptest::depth() matches");
+    assert(proptest::max_depth(d) == 3, "proptest::max_depth() matches");
+    assert(proptest::can_recurse(d), "proptest::can_recurse() matches");
+
+    // 2. Manual enter_depth and leave_depth
+    assert(d.enter_depth(), "enter depth level 1");
+    assert(d.depth() == 1, "depth is 1");
+    assert(d.can_recurse(), "can recurse at depth 1");
+
+    assert(d.enter_depth(), "enter depth level 2");
+    assert(d.depth() == 2, "depth is 2");
+    assert(d.can_recurse(), "can recurse at depth 2");
+
+    assert(d.enter_depth(), "enter depth level 3");
+    assert(d.depth() == 3, "depth is 3");
+    assert(!d.can_recurse(), "cannot recurse when depth == max_depth");
+    assert(!d.enter_depth(), "entering beyond max_depth returns false");
+    assert(d.depth() == 3, "depth stays at 3");
+
+    d.leave_depth();
+    assert(d.depth() == 2, "leave_depth decrements to 2");
+    assert(d.can_recurse(), "can recurse again");
+
+    d.leave_depth();
+    d.leave_depth();
+    assert(d.depth() == 0, "depth back to 0");
+    d.leave_depth();
+    assert(d.depth() == 0, "depth clamped at 0");
+
+    // Namespaced enter_depth / leave_depth
+    assert(proptest::enter_depth(d), "proptest::enter_depth succeeds");
+    assert(proptest::depth(d) == 1, "proptest::depth is 1");
+    proptest::leave_depth(d);
+    assert(proptest::depth(d) == 0, "proptest::leave_depth restores to 0");
+
+    // 3. Scoped block combinator: d.recurse() { d => ... }
+    var entered_count = 0;
+    var inner_depth_ok = false;
+    let ok1 = d.recurse() { d1 =>
+        entered_count += 1;
+        assert(d1.depth() == 1, "depth 1 inside first recurse");
+        let ok2 = d1.recurse() { d2 =>
+            entered_count += 1;
+            assert(d2.depth() == 2, "depth 2 inside second recurse");
+            let ok3 = d2.recurse() { d3 =>
+                entered_count += 1;
+                assert(d3.depth() == 3, "depth 3 inside third recurse");
+                assert(!d3.can_recurse(), "can_recurse false at max depth");
+                let ok4 = d3.recurse() { d4 =>
+                    entered_count += 1;
+                };
+                assert(!ok4, "recurse at max depth returns false");
+            };
+            assert(ok3, "third recurse succeeded");
+        };
+        assert(ok2, "second recurse succeeded");
+        inner_depth_ok = (d1.depth() == 1);
+    };
+    assert(ok1, "first recurse succeeded");
+    assert(entered_count == 3, "entered exactly 3 levels of recursion");
+    assert(inner_depth_ok, "depth unrolled properly inside scope");
+    assert(d.depth() == 0, "depth unrolled back to 0 at root");
+
+    // Namespaced recurse combinator
+    let ns_ok = proptest::recurse(d) { drv =>
+        assert(drv.depth() == 1, "drv.depth == 1 inside proptest::recurse");
+    };
+    assert(ns_ok, "proptest::recurse succeeded");
+    assert(d.depth() == 0, "restored after proptest::recurse");
+
+    // 4. gen_variant depth guard behavior
+    // When depth == max_depth, variant must return 0 (base case)
+    var d_full = driver(999, 2);
+    assert(d_full.enter_depth(), "enter 1");
+    assert(d_full.enter_depth(), "enter 2");
+    assert(!d_full.can_recurse(), "cannot recurse");
+    for _ in 20 {
+        assert(d_full.variant(5) == 0, "variant returns 0 base-case when !can_recurse");
+        assert(gen_variant(d_full, 5) == 0, "gen_variant returns 0 base-case when !can_recurse");
+    }
+    d_full.leave_depth();
+    d_full.leave_depth();
+    assert(d_full.depth() == 0, "d_full restored");
+
+    // 5. Integration property test with recursive tree depth verification
+    check().max_depth(4).iterations(100).for_each() { drv =>
+        assert(drv.depth() == 0, "root depth 0");
+        assert(drv.max_depth() == 4, "root max_depth 4");
+        var max_observed_depth = 0;
+        drv.recurse() { d1 =>
+            if d1.depth() > max_observed_depth { max_observed_depth = d1.depth(); }
+            d1.recurse() { d2 =>
+                if d2.depth() > max_observed_depth { max_observed_depth = d2.depth(); }
+                d2.recurse() { d3 =>
+                    if d3.depth() > max_observed_depth { max_observed_depth = d3.depth(); }
+                    d3.recurse() { d4 =>
+                        if d4.depth() > max_observed_depth { max_observed_depth = d4.depth(); }
+                        let ok_too_deep = d4.recurse() { d5 =>
+                            assert(false, "should never execute beyond max_depth");
+                        };
+                        assert(!ok_too_deep, "depth guard prevented excessive recursion");
+                    };
+                };
+            };
+        };
+        assert(drv.depth() == 0, "depth perfectly balanced at test end");
+        assert(max_observed_depth == 4, "reached max_depth");
+        true
+    };
+}
+
 fn main() {
     test_driver_modes();
     test_generators();
@@ -329,5 +451,6 @@ fn main() {
     test_doc_examples();
     test_assume_filtering();
     test_string_strategies();
+    test_depth_guard();
     print("proptest: all properties, generators, drivers and shrinking passed");
 }

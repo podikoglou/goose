@@ -2445,10 +2445,17 @@ fn alphanumeric(d: Driver&, min_len: i64, max_len: i64) -> u8[>..]
 fn alphanumeric(d: Driver&, len: i64) -> u8[>..]
 fn gen_array<F>(d: Driver&, min_len: i64, max_len: i64)
 
-// Combinators
+// Combinators & recursion
 fn choose<T>(d: Driver&, items: const T[:]) -> T
 fn one_of<T>(d: Driver&, items: const T[:]) -> T
+fn variant(d: Driver&, num_variants: i64) -> i64
 fn frequency(d: Driver&, weights: const i64[:]) -> i64
+fn recurse<F>(d: Driver&) -> bool
+fn can_recurse(d: Driver&) -> bool
+fn depth(d: Driver&) -> i32
+fn max_depth(d: Driver&) -> i32
+fn enter_depth(d: Driver&) -> bool
+fn leave_depth(d: Driver&)
 
 // Assumption filtering
 fn assume(d: Driver&, cond: bool) -> bool
@@ -2457,7 +2464,8 @@ fn is_discarded(d: Driver&) -> bool
 ```
 
 UFCS applies directly to `Driver`: `d.gen_i64()`, `d.boolean()`, `d.next_u32()`, `d.int_range(0, 100)`,
-`d.ascii(1, 32)`, `d.ascii(16)`, `d.utf8(64)`, `d.alphanumeric(8)`, `d.string_from("0123456789", 4)`, `d.assume(cond)`.
+`d.ascii(1, 32)`, `d.ascii(16)`, `d.utf8(64)`, `d.alphanumeric(8)`, `d.string_from("0123456789", 4)`,
+`d.can_recurse()`, `d.recurse() { drv => ... }`, `d.assume(cond)`.
 
 ### String and character strategies
 
@@ -2467,6 +2475,50 @@ UFCS applies directly to `Driver`: `d.gen_i64()`, `d.boolean()`, `d.next_u32()`,
 - **`d.utf8(min_len, max_len)` / `d.utf8(max_len)`**: Generates valid multi-byte UTF-8 sequences. The single-argument form `d.utf8(max_len)` is shorthand for `d.utf8(0, max_len)`.
 - **`d.alphanumeric(min_len, max_len)` / `d.alphanumeric(len)`**: Generates strings composed of letters and digits (`[a-zA-Z0-9]`), ideal for identifiers, keys, and tokens.
 - **`d.string_from(charset, min_len, max_len)` / `d.string_from(charset, len)`**: Samples characters exclusively from the provided `charset` slice (e.g. hex `"0123456789abcdef"`, base64, DNA sequences, punctuation). Returns an empty string if `charset` is empty.
+
+### Recursive depth guards: `d.can_recurse()` and `d.recurse()`
+
+When generating recursive data structures such as trees, ASTs, JSON values, or nested expressions, recursive generators must terminate cleanly and stay bounded to prevent stack overflow and exponential memory explosion.
+
+Instead of manually threading depth counters (e.g. `depth: i32`) through recursive helper functions, `Driver` automatically tracks the current recursion depth (`d.depth()`) against a configurable maximum depth bound (`d.max_depth()`, configured via `check().max_depth(...)`):
+
+- **`d.can_recurse()` -> bool**: Returns `true` if `d.depth() < d.max_depth()`. Use this to gate recursive container choices or select leaf base cases when depth is exhausted.
+- **`d.depth()` -> i32**: Returns the current recursion depth (starting at 0).
+- **`d.max_depth()` -> i32**: Returns the maximum recursion depth limit for the test campaign (defaults to 5 if unspecified).
+- **`d.recurse() { drv => ... }` -> bool**: Scoped block combinator. Attempts to enter the next recursion level. If `d.can_recurse()` is `false`, it returns `false` without executing the block. If depth capacity remains, it increments depth, executes the enclosed block, safely decrements depth on exit, and returns `true`.
+- **`d.variant(n)` -> i64**: Automatically falls back to variant 0 (the canonical non-recursive base case / leaf) whenever `!d.can_recurse()`.
+
+#### Example: Recursive AST / Tree Generator
+
+```goose
+import proptest;
+
+enum Expr {
+    Num { val: i64 },
+    Var { name: u8[>..] },
+    Add { left: Expr&<u32>?, right: Expr&<u32>? },
+}
+
+recursive fn gen_expr(pool: Expr[>..]&, d: Driver&) -> Expr&<u32>? {
+    // If maximum depth is reached, restrict selection to base-case leaf nodes (Num, Var)
+    let num_variants = if d.can_recurse() { 3 } else { 2 };
+    let kind = d.int_range(0, num_variants - 1);
+
+    if kind == 0 {
+        return pool.push(Expr.Num { val: d.gen_i64(-100, 100) });
+    } else if kind == 1 {
+        return pool.push(Expr.Var { name: d.alphanumeric(1, 4) });
+    } else {
+        var left: Expr&<u32>? = null;
+        var right: Expr&<u32>? = null;
+        d.recurse() { drv =>
+            left = gen_expr(pool, drv);
+            right = gen_expr(pool, drv);
+        };
+        return pool.push(Expr.Add { left, right });
+    }
+}
+```
 
 ### Assumption filtering: `d.assume(cond)`
 

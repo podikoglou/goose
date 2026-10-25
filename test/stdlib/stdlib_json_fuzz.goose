@@ -36,8 +36,8 @@ fn serialize_doc(out: u8[>..]&, doc: json::Node[>..]&) {
 
 // --- Structured Generator ----------------------------------------------------
 
-recursive fn gen_json_value(out: u8[>..]&, d: Driver&, depth: i32) {
-    let container_weight = if depth < 4 { 15 } else { 0 };
+recursive fn gen_json_value(out: u8[>..]&, d: Driver&) {
+    let container_weight = if d.can_recurse() { 15 } else { 0 };
     // [null, bool, int, num, str, arr, obj]
     let weights: i64[7] = [10, 15, 20, 20, 25, container_weight, container_weight];
     let kind = d.frequency(weights);
@@ -45,13 +45,13 @@ recursive fn gen_json_value(out: u8[>..]&, d: Driver&, depth: i32) {
     if kind == 0 {
         out.append("null");
     } else if kind == 1 {
-        out.append(if d.next_bool() { "true" } else { "false" });
+        out.append(if d.boolean() { "true" } else { "false" });
     } else if kind == 2 {
         let int_choice = d.int_range(0, 5);
         if int_choice == 0 {
             out.push('0');
         } else if int_choice == 1 {
-            format(out, d.next_i64());
+            format(out, d.gen_i64());
         } else if int_choice == 2 {
             // Edge integers
             let edges: i64[4] = [9223372036854775807, -9223372036854775807, 2147483647, -2147483648];
@@ -62,7 +62,7 @@ recursive fn gen_json_value(out: u8[>..]&, d: Driver&, depth: i32) {
     } else if kind == 3 {
         let num_choice = d.int_range(0, 4);
         if num_choice == 0 {
-            json::format_number(out, d.next_f64());
+            json::format_number(out, d.gen_f64());
         } else if num_choice == 1 {
             // Exponent notations
             let mant = d.int_range(-99, 99);
@@ -96,31 +96,39 @@ recursive fn gen_json_value(out: u8[>..]&, d: Driver&, depth: i32) {
                 out.append("\\u");
                 out.append(d.choose(hex));
             } else {
-                out.push(d.choose("abcdef0123+-*/ =_!@#$%^&()"));
+                let s = d.string_from("abcdef0123+-*/ =_!@#$%^&()", 1);
+                out.append(s);
             }
         }
         out.push('"');
     } else if kind == 5 {
         // Array
         out.push('[');
-        let count = d.int_range(0, 4);
-        for i in count {
-            if i > 0 { out.push(','); }
-            gen_json_value(out, d, depth + 1);
-        }
+        d.recurse() { drv =>
+            let count = drv.int_range(0, 4);
+            for i in count {
+                if i > 0 { out.push(','); }
+                gen_json_value(out, drv);
+            }
+        };
         out.push(']');
     } else {
         // Object
         out.push('{');
-        let count = d.int_range(0, 4);
-        for i in count {
-            if i > 0 { out.push(','); }
-            out.push('"');
-            out.push(d.choose("abcdefg"));
-            format(out, i);
-            out.append("\":");
-            gen_json_value(out, d, depth + 1);
-        }
+        d.recurse() { drv =>
+            let count = drv.int_range(0, 4);
+            for i in count {
+                if i > 0 { out.push(','); }
+                out.push('"');
+                {
+                    let key = drv.alphanumeric(1, 4);
+                    out.append(key);
+                }
+                format(out, i);
+                out.append("\":");
+                gen_json_value(out, drv);
+            }
+        };
         out.push('}');
     }
 }
@@ -187,7 +195,7 @@ fuzz fn fuzz_json_reader(data: const u8[:]) {
 // 3. Structured generator fuzz target
 fuzz fn fuzz_json_structured(d: Driver&) -> bool {
     var text: u8[>..] = [];
-    gen_json_value(text, d, 0);
+    gen_json_value(text, d);
 
     var doc: json::Node[>..] = [];
     var decoded: u8[>..] = [];
