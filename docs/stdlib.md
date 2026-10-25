@@ -2628,3 +2628,91 @@ goose fuzz parser.goose --corpus-dir ./fuzz_corpus
 `thread_spawn_contained`. When a worker panics, asserts, encounters an
 out-of-bounds index, or divides by zero, the trap is contained, recorded, and
 shrunk to the minimal reproduction case without crashing the fuzzer process.
+
+### Declarative property verification: `prop` and `goose test`
+
+Goose introduces `prop`, a top-level declarative property verification construct that eliminates imperative test harness boilerplate:
+
+```goose
+prop for i where i in 6..=90 {
+    fib(i) > i
+}
+fn fib(n: i64) -> i64 {
+    var a: i64 = 0;
+    var b: i64 = 1;
+    for _ in n {
+        let t = a + b;
+        a = b;
+        b = t;
+    }
+    a
+}
+```
+
+#### Syntax and Placement
+
+Properties are declared exclusively at top level:
+
+```ebnf
+PropDecl        ::= "prop" [ StringLiteral ] [ PropForClause ] [ PropWhereClause ] [ PropWithClause ] Block
+PropForClause   ::= "for" QuantifierList
+QuantifierList  ::= Quantifier { "," Quantifier }
+Quantifier      ::= Identifier [ ":" Type ] | "(" Identifier ":" Type ")"
+PropWhereClause ::= "where" ConstraintList
+ConstraintList  ::= ConstraintExpr { "," ConstraintExpr }
+PropWithClause  ::= "with" "(" ConfigList ")"
+ConfigList      ::= ConfigItem { "," ConfigItem }
+ConfigItem      ::= Identifier "=" Expression
+```
+
+- **Function Adjacency & Stacking:** One or more properties placed directly above a function attach to that function. If `for` is omitted, the property quantifies over all parameters of the target function.
+  ```goose
+  prop "idempotent" for xs {
+      sort(sort(xs)) == sort(xs)
+  }
+  prop "preserves length" for xs {
+      sort(xs).len == xs.len
+  }
+  fn sort(xs: const i64[:]) -> i64[>..] { ... }
+  ```
+- **Standalone Properties:** A property not preceding a function must supply both an identifying tag name and an explicit `for` clause:
+  ```goose
+  prop "codec roundtrip" for (data: const u8[:]) where data.len > 0 {
+      decode(encode(data)) == data
+  }
+  ```
+
+#### The Pragmatic Constraint Engine
+
+The compiler analyzes preconditions declared in `where` using a 3-tier constraint architecture:
+
+1. **Tier 1 (Static Intervals):** Explicit bounds (`i in 6..=90`, `data.len in 1..=64`, `x >= 0`) directly narrow generator domains at compile time with zero discarded iterations. Static unsatisfiability (e.g., `x > 10, x < 5`) is rejected at compile time.
+2. **Tier 2 (Relational Dependencies & Tightening):** Preconditions with dependent bounds (`j in (i + 1)..=90`) form a directed dependency graph. The compiler detects cycles (e.g., `i < j, j < i`) and walks the graph in reverse-topological order to tighten parent domains: $j \in [i+1, 90]$ tightens $i \in [2, 89]$.
+3. **Tier 3 (Arbitrary Predicates):** Multi-variable linear arithmetic and opaque conditions (`x + y < 1000`) lower to runtime `d.assume()` filters. Any scalar variable appearing in a Tier 3 predicate must have an explicit Tier 1 or Tier 2 bound, preventing 100% discard rates.
+
+#### Slice Views and Data-Stack Allocation
+
+When a property quantifies over a slice view (`const T[:]`), the test harness automatically synthesizes an owned dynamic array on Goose's thread-local bump stack using `d.gen_array()`, slices it into `xs`, and resets the stack frame on iteration completion with zero heap overhead.
+
+#### Running properties with `goose test`
+
+Execute property verification campaigns using `goose test`:
+
+```bash
+# Discover all property targets in a file
+goose test math.goose --list-targets
+
+# Run all property verification targets in a file
+goose test math.goose
+
+# Run a specific target
+goose test math.goose --target "fib::strictly monotonic"
+
+# Override campaign parameters from CLI
+goose test math.goose --timeout 10 --seed 12345 --max-len 256
+
+# Replay a minimal counterexample from hex or file
+goose test math.goose --replay "0021"
+```
+
+Continuous fuzz campaigns run with `goose fuzz file.goose` also automatically discover and fuzz top-level `prop` targets alongside `fuzz fn` targets.

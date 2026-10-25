@@ -1,0 +1,17 @@
+--- Declarative Property Verification (`prop`) ---
+1. Fibonacci properties:
+   fib(6) = 8 (> 6: true)
+   fib(20) = 6765, fib(21) = 10946 (monotonic: true)
+2. Sorting properties:
+   input:      [9, 3, 7, 1, 5, 2]
+   sorted:     [1, 2, 3, 5, 7, 9]
+   idempotent: true
+   len equal:  true
+3. Reverse involution:
+   original:   [10, 20, 30, 40, 50]
+   reversed:   [50, 40, 30, 20, 10]
+   restored:   [10, 20, 30, 40, 50]
+   identity:   true
+4. Linear constraints:
+   add(200, 300) = 500 (< 1000: true)
+34_prop: all declarative property examples demonstrated successfully
