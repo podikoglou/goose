@@ -79,11 +79,23 @@ inline bool MatchesPropTarget(const PropDecl *prop, const string &target_name, c
     return false;
 }
 
+// Check if a property was declared in the target source file (or fileidx 0).
+inline bool IsPropInSourceFile(const Ast &ast, const PropDecl *prop, const string &source_file) {
+    if (source_file.empty()) return true;
+    if (prop->line.fileidx == 0) return true;
+    if (prop->line.fileidx >= 0 && prop->line.fileidx < (int)ast.sources.size()) {
+        const string &pfile = ast.sources[prop->line.fileidx].first;
+        if (pfile == source_file || PathStem(pfile) == PathStem(source_file)) return true;
+    }
+    return false;
+}
+
 // List all discovered property verification target names in an AST.
-inline vector<string> ListPropTargets(const Ast &ast) {
+inline vector<string> ListPropTargets(const Ast &ast, const string &source_file = "") {
     vector<string> targets;
     int index = 0;
     for (auto prop : ast.props) {
+        if (!IsPropInSourceFile(ast, prop, source_file)) continue;
         targets.push_back(ComputePropTargetName(prop, index++));
     }
     return targets;
@@ -397,6 +409,7 @@ inline bool GeneratePropHarness(const Ast &ast, const string &source_file,
     vector<pair<PropDecl *, string>> matched;
     int index = 0;
     for (auto prop : ast.props) {
+        if (!IsPropInSourceFile(ast, prop, source_file)) continue;
         string tname = ComputePropTargetName(prop, index++);
         if (MatchesPropTarget(prop, tname, opts.target_filter)) {
             matched.push_back({prop, tname});

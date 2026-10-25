@@ -1415,7 +1415,7 @@ int Main(int argc, char **argv) {
         // The checker reported the errors it went on past, root by root.
         if (!ast.errors.empty()) return 1;
         if (list_prop_targets) {
-            auto targets = ListPropTargets(ast);
+            auto targets = ListPropTargets(ast, filename);
             for (auto &t : targets) {
                 printf("%s\n", t.c_str());
             }
@@ -1694,14 +1694,21 @@ int Main(int argc, char **argv) {
             if (!ast.errors.empty()) return 1;
 
             if (list_prop_targets || fuzz_list_targets) {
-                auto targets = ListPropTargets(ast);
+                auto targets = ListPropTargets(ast, targetfile);
                 for (auto &t : targets) {
                     printf("%s\n", t.c_str());
                 }
                 return 0;
             }
 
-            if (ast.props.empty()) {
+            bool has_target_prop = false;
+            for (auto prop : ast.props) {
+                if (IsPropInSourceFile(ast, prop, targetfile)) {
+                    has_target_prop = true;
+                    break;
+                }
+            }
+            if (!has_target_prop) {
                 printf("no property tests found in %s\n", targetfile.c_str());
                 return 0;
             }
@@ -1806,8 +1813,10 @@ int Main(int argc, char **argv) {
         }
         int prop_idx = 0;
         for (auto prop : ast.props) {
-            string pname = ComputePropTargetName(prop, prop_idx++);
-            targets.push_back(FuzzTarget { FuzzTarget::PROP, pname, prop->line.line, nullptr, prop });
+            if (prop->line.fileidx == 0) {
+                string pname = ComputePropTargetName(prop, prop_idx++);
+                targets.push_back(FuzzTarget { FuzzTarget::PROP, pname, prop->line.line, nullptr, prop });
+            }
         }
 
         if (fuzz_list_targets) {
